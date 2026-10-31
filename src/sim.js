@@ -218,7 +218,7 @@ function affinity(a, b) {
 }
 function dailyRelationships() {
   const byBlock = {};
-  S.inm.forEach(i => { if (i.blk) (byBlock[i.blk] = byBlock[i.blk] || []).push(i); });
+  S.inm.forEach(i => { if (i.blk && i.disc !== 'Solitary' && !i.infirm) (byBlock[i.blk] = byBlock[i.blk] || []).push(i); });
   for (const bid in byBlock) {
     const list = byBlock[bid]; if (list.length < 2) continue;
     const n = Math.ceil(list.length * .25);
@@ -285,7 +285,7 @@ function hourTick(h) {
   let medCap = staffCount('Medical Staff', true) * 6;
 
   let wages = 0, workshopHrs = 0, yardUsed = 0; const yardCap = (S.yards || 0) * YARD_CAP;
-  const yardGP = [], yardPC = [];
+  const yardGP = [], yardPC = [], rolls = [];
   const visitDay = S.settings.visitDays[dow()];
   const blockRivals = {};
 
@@ -294,7 +294,7 @@ function hourTick(h) {
     const c = cov[b.id] == null ? 1 : cov[b.id];
     let act = effectiveAct(i, S.sched[i.cls][h], b, c);
     if (act === 'Yard') { if (yardUsed >= yardCap) { act = 'Lockdown'; hourFlags.yardFull = (hourFlags.yardFull || 0) + 1; } else { yardUsed++; (i.cls === 'Protective' ? yardPC : yardGP).push(i); } }
-    i.loc = LOC[act] || act;
+    i.loc = i.disc === 'Solitary' ? 'Solitary confinement' : (LOC[act] || act);
     const n = i.n;
     // base decay
     const asleep = act === 'Sleep';
@@ -352,8 +352,10 @@ function hourTick(h) {
     for (const k in n) n[k] = clamp(n[k]);
 
     // incidents
-    if (!asleep && act !== 'Infirmary') rollIncident(i, b, c, act, blockRivals[i.id]);
+    if (!asleep && act !== 'Infirmary') rolls.push([i, b, c, act, blockRivals[i.id]]);
   }
+  // incidents are rolled after everyone's location for this hour is known
+  for (const r of rolls) if (S.inm.includes(r[0])) rollIncident(r[0], r[1], r[2], r[3], r[4]);
   if (yardPC.length && yardGP.length) yardClash(yardPC, yardGP);
   if (wages > 0) accrue(wages, 'Inmate wages');
   if (workshopHrs > 0) { const r = workshopHrs * 11; S.money += r; T.income['Workshop contracts'] = (T.income['Workshop contracts'] || 0) + r; }
@@ -422,7 +424,10 @@ function rollIncident(i, b, cov, act, rivalsHere) {
 }
 function makeIncident(i, b, type, cov) {
   let sev = 'Minor', desc = '', others = [];
-  const mates = S.inm.filter(x => x.blk === b.id && x.id !== i.id);
+  // Only inmates physically present with this inmate right now can be involved. Inmates in solitary or the infirmary are isolated.
+  const isolated = i.disc === 'Solitary' || i.infirm;
+  const mates = isolated ? [] : S.inm.filter(x => x.id !== i.id && x.disc !== 'Solitary' && !x.infirm && x.loc === i.loc && (x.blk === b.id || /yard|Dining|Program|Work|Visitation/i.test(i.loc)));
+  if (!mates.length && type === 'Fight') type = 'Assault on staff';
   switch (type) {
     case 'Argument': {
       const o = mates.find(x => i.rivals.includes(x.id)) || pick(mates); if (o) { others.push(o); if (rnd() < .3) rival(i, o); }
