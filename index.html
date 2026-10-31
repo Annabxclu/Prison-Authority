@@ -210,16 +210,20 @@ const wpick = (items) => { let t = sum(items, x => x[1]); let r = rnd() * t; for
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 /* ================= Constants ================= */
-const CLASSES = ['Minimum', 'Medium', 'Maximum', 'Supermax', 'Protective'];
-const CLS_SHORT = { Minimum: 'MIN', Medium: 'MED', Maximum: 'MAX', Supermax: 'SMX', Protective: 'PC' };
-const CLS_LABEL = { Minimum: 'Minimum', Medium: 'Medium', Maximum: 'Maximum', Supermax: 'Supermax', Protective: 'Protective Custody' };
-const CLS_MULT = { Minimum: .7, Medium: 1, Maximum: 1.4, Supermax: 1.7, Protective: .6 };
-const OFFICER_RATIO = { Minimum: 20, Medium: 12, Maximum: 6, Supermax: 3, Protective: 8 };
-const PAROLE_FRAC = { Minimum: .5, Medium: .6, Maximum: .7, Supermax: .85, Protective: .6 };
-const DEFAULT_FUNDING = { Minimum: 60, Medium: 75, Maximum: 110, Supermax: 180, Protective: 105 };
-const DEFAULT_INTAKE = { Minimum: 5, Medium: 10, Maximum: 4, Supermax: 1, Protective: 1 };
-const BEDS_PER_CELL = { Minimum: 2, Medium: 2, Maximum: 1, Supermax: 1, Protective: 1 };
-const CELL_BASE_COST = { Minimum: 2200, Medium: 2800, Maximum: 4200, Supermax: 7000, Protective: 4000 };
+const CLASSES = ['Minimum', 'Medium', 'Maximum', 'Supermax', 'Protective', 'DeathRow', 'Insane'];
+const CLS_SHORT = { Minimum: 'MIN', Medium: 'MED', Maximum: 'MAX', Supermax: 'SMX', Protective: 'PC', DeathRow: 'DR', Insane: 'CI' };
+const CLS_LABEL = { Minimum: 'Minimum', Medium: 'Medium', Maximum: 'Maximum', Supermax: 'Supermax', Protective: 'Protective Custody', DeathRow: 'Death Row', Insane: 'Criminally Insane' };
+const CLS_MULT = { Minimum: .7, Medium: 1, Maximum: 1.4, Supermax: 1.7, Protective: .6, DeathRow: 1.2, Insane: 1.6 };
+const OFFICER_RATIO = { Minimum: 20, Medium: 12, Maximum: 6, Supermax: 3, Protective: 8, DeathRow: 3, Insane: 4 };
+const PAROLE_FRAC = { Minimum: .5, Medium: .6, Maximum: .7, Supermax: .85, Protective: .6, DeathRow: null, Insane: .75 };
+const DEFAULT_FUNDING = { Minimum: 60, Medium: 75, Maximum: 110, Supermax: 180, Protective: 105, DeathRow: 230, Insane: 200 };
+const DEFAULT_INTAKE = { Minimum: 5, Medium: 10, Maximum: 4, Supermax: 1, Protective: 1, DeathRow: .2, Insane: .5 };
+const BEDS_PER_CELL = { Minimum: 2, Medium: 2, Maximum: 1, Supermax: 1, Protective: 1, DeathRow: 1, Insane: 1 };
+const CELL_BASE_COST = { Minimum: 2200, Medium: 2800, Maximum: 4200, Supermax: 7000, Protective: 4000, DeathRow: 7500, Insane: 6000 };
+const NEVER = 999999; // death row: no release or parole date
+const APPEAL_STAGES = ['Direct appeal', 'State post-conviction review', 'Federal habeas corpus', 'Clemency petition'];
+const CAPITAL_CHARGES = ['Capital murder', 'Murder with special circumstances', 'Multiple homicide', 'Murder of a law enforcement officer', 'Murder during a kidnapping'];
+const INSANE_DX = ['Paranoid schizophrenia', 'Schizoaffective disorder', 'Bipolar disorder with psychotic features', 'Delusional disorder', 'Severe psychotic depression'];
 const PC_REASONS = ['Former police officer', 'Former corrections officer', 'Informant / cooperating witness', 'Gang dropout', 'High-profile case', 'Vulnerable (age or health)', 'Former prosecutor\'s investigator', 'Testified against co-defendants'];
 const YARD_CAP = 100, YARD_COST = 30000;
 const WEATHER = [['Clear', 45], ['Cloudy', 30], ['Rain', 18], ['Storm', 7]];
@@ -239,7 +243,8 @@ const ROLES = {
   'Teacher': { dept: 'Rehabilitation', sal: 50000 },
   'Kitchen Worker': { dept: 'Food Services', sal: 32000 },
   'Maintenance Worker': { dept: 'Facilities', sal: 38000 },
-  'Rehabilitation Specialist': { dept: 'Rehabilitation', sal: 58000 }
+  'Rehabilitation Specialist': { dept: 'Rehabilitation', sal: 58000 },
+  'Psychiatrist': { dept: 'Healthcare', sal: 125000 }
 };
 const ROLE_NAMES = Object.keys(ROLES);
 
@@ -278,6 +283,15 @@ const ACT_NAMES = Object.keys(ACTS);
 function defaultSchedule(cls) {
   const s = Array(24).fill('Sleep');
   s[6] = 'Wake'; s[7] = 'Meal';
+  if (cls === 'DeathRow') {
+    for (let h = 8; h < 22; h++) s[h] = 'Lockdown';
+    s[11] = 'Yard'; s[12] = 'Meal'; s[14] = 'Rehab'; s[16] = 'Shower'; s[17] = 'Meal'; s[18] = 'Visits';
+    return s;
+  }
+  if (cls === 'Insane') {
+    s[8] = s[9] = 'Rehab'; s[10] = 'Recreation'; s[11] = 'Yard'; s[12] = 'Meal'; s[13] = 'Rehab'; s[14] = s[15] = 'Free'; s[16] = 'Shower'; s[17] = 'Meal'; s[18] = 'Visits'; s[19] = 'Recreation'; s[20] = s[21] = 'Lockdown';
+    return s;
+  }
   if (cls === 'Supermax') {
     for (let h = 8; h < 24; h++) s[h] = 'Lockdown';
     s[12] = 'Meal'; s[11] = 'Yard'; s[13] = 'Recreation'; s[14] = 'Rehab'; s[16] = 'Shower'; s[17] = 'Meal'; s[22] = s[23] = 'Sleep';
@@ -308,7 +322,8 @@ const PROGRAMS = {
   'Life Skills': { role: 'Rehabilitation Specialist', per: 15, hrs: 30, elig: CLASSES, cert: 'Life Skills Certificate', fx: { beh: 6, parole: 6 } },
   'Anger Management': { role: 'Psychologist', per: 10, hrs: 30, elig: CLASSES, cert: 'Anger Management Completion', fx: { beh: 12, parole: 10, calm: true } },
   'Substance Recovery': { role: 'Rehabilitation Specialist', per: 12, hrs: 50, elig: CLASSES, cert: 'Recovery Program Completion', fx: { beh: 8, parole: 12 } },
-  'Counseling': { role: 'Psychologist', per: 12, hrs: 20, elig: CLASSES, cert: 'Counseling Completion', fx: { beh: 5, parole: 5, stress: true } }
+  'Counseling': { role: 'Psychologist', per: 12, hrs: 20, elig: CLASSES, cert: 'Counseling Completion', fx: { beh: 5, parole: 5, stress: true } },
+  'Psychiatric Treatment': { role: 'Psychiatrist', per: 8, hrs: 30, elig: ['DeathRow', 'Insane'], cert: 'Psychiatric Treatment Course', fx: { beh: 6, parole: 6, stress: true }, repeat: true }
 };
 const PROG_NAMES = Object.keys(PROGRAMS);
 
@@ -319,7 +334,7 @@ const CHARGES = {
   4: ['Armed robbery', 'Kidnapping', 'Manslaughter', 'Organized crime', 'Weapons trafficking'],
   5: ['Murder', 'Attempted murder', 'Serial armed robbery', 'Criminal enterprise leadership']
 };
-const SEV_RANGE = { Minimum: [1, 2], Medium: [2, 3], Maximum: [3, 4], Supermax: [4, 5], Protective: [1, 4] };
+const SEV_RANGE = { Minimum: [1, 2], Medium: [2, 3], Maximum: [3, 4], Supermax: [4, 5], Protective: [1, 4], DeathRow: [5, 5], Insane: [2, 5] };
 const SENT_RANGE = { 1: [20, 60], 2: [40, 120], 3: [90, 240], 4: [180, 450], 5: [365, 900] };
 const SEV_LABEL = { 1: 'Low', 2: 'Moderate', 3: 'Serious', 4: 'Severe', 5: 'Extreme' };
 
@@ -347,7 +362,7 @@ const CAREER = [
     reward: 'Grant: $75,000 + Premium (Tier 3) cells', give: () => { S.unlock.tier3 = true; grant(75000, 'Inspection grant'); } },
   { id: 'maxsec', t: 'Maximum security', d: 'House 20 Maximum security inmates with no escapes in the last 7 days.',
     ok: () => S.inm.filter(i => i.cls === 'Maximum').length >= 20 && (S.stats.lastEscapeDay == null || curDay() - S.stats.lastEscapeDay >= 7),
-    reward: 'Unlock Supermax', give: () => unlockClass('Supermax') },
+    reward: 'Unlock Supermax, Death Row and Criminally Insane', give: () => { unlockClass('Supermax'); unlockClass('DeathRow'); unlockClass('Insane'); } },
   { id: 'parole', t: 'Parole system', d: 'Achieve 10 parole approvals.',
     ok: () => S.stats.paroleApproved >= 10,
     reward: 'Performance bonus funding (+5%)', give: () => { S.unlock.bonus = true; } },
@@ -370,14 +385,15 @@ function newState(cfg) {
     v: 1, id: uid(), name: cfg.name, mode: cfg.mode, pop: cfg.pop, size: cfg.size,
     created: Date.now(), t: 6 * 60, speed: 0,
     money: cfg.funds,
-    seq: { inm: 1, staff: 1, inc: 1, blk: 1, tx: 1, note: 1 },
+    seq: { inm: 1, staff: 1, inc: 1, blk: 1, tx: 1, note: 1 }, test: cfg.mode === 'test',
     settings: {
       intake: Object.assign({}, DEFAULT_INTAKE), intakeOn: true, overflow: 'queue', queueMax: 40, queueDays: 5,
       funding: Object.assign({}, DEFAULT_FUNDING),
       mealQuality: 'Standard', autoReorder: true, reorderDays: 5,
       autoHandle: 'moderate', searches: 'weekly', screening: 'standard',
       visitDays: [false, false, true, false, false, true, true],
-      autoJobs: true, autoEnroll: true, paroleMode: 'review'
+      autoJobs: true, autoEnroll: true, paroleMode: 'review', progChoice: 'inmate',
+      disc: defaultDiscipline(), escalate: true
     },
     unlock: {
       classes: cfg.mode === 'career' ? ['Minimum', 'Medium'] : CLASSES.slice(),
@@ -400,8 +416,8 @@ function newState(cfg) {
   // Starting blocks
   const plans = {
     Small: [['A Block', 'Minimum', 10, 2, 1], ['B Block', 'Medium', 15, 2, 1]],
-    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Maximum', 30, 1, 1], ['Segregation Unit', 'Supermax', 10, 1, 2], ['PC Unit', 'Protective', 10, 1, 2]],
-    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 45, 1, 1], ['Segregation Unit', 'Supermax', 20, 1, 2], ['PC Unit', 'Protective', 15, 1, 2]]
+    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 25, 2, 1], ['C Block', 'Maximum', 24, 1, 1], ['Segregation Unit', 'Supermax', 8, 1, 2], ['PC Unit', 'Protective', 10, 1, 2], ['Death Row', 'DeathRow', 8, 1, 2], ['Forensic Unit', 'Insane', 10, 1, 2]],
+    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 50, 1, 1], ['Segregation Unit', 'Supermax', 15, 1, 2], ['PC Unit', 'Protective', 15, 1, 2], ['Death Row', 'DeathRow', 12, 1, 2], ['Forensic Unit', 'Insane', 18, 1, 2]]
   };
   let plan = cfg.mode === 'career' ? plans.Small : plans[cfg.size];
   if (cfg.mode !== 'career' && cfg.classes) {
@@ -409,7 +425,7 @@ function newState(cfg) {
     const total = sum(plan, p => p[2] * p[3]);
     plan = plan.filter(p => cfg.classes.includes(p[1]));
     const missing = cfg.classes.filter(c => !plan.some(p => p[1] === c));
-    missing.forEach((c, i) => plan.push([c === 'Protective' ? 'PC Unit' : c === 'Supermax' ? 'Segregation Unit' : String.fromCharCode(65 + plan.length) + ' Block', c, 10, BEDS_PER_CELL[c], 1]));
+    missing.forEach((c, i) => plan.push([c === 'Protective' ? 'PC Unit' : c === 'Supermax' ? 'Segregation Unit' : c === 'DeathRow' ? 'Death Row' : c === 'Insane' ? 'Forensic Unit' : String.fromCharCode(65 + plan.length) + ' Block', c, 10, BEDS_PER_CELL[c], 1]));
     let have = sum(plan, p => p[2] * p[3]);
     if (plan.length && have < total) {
       const f = total / have; plan = plan.map(p => [p[0], p[1], Math.max(1, Math.round(p[2] * f)), p[3], p[4]]);
@@ -444,7 +460,8 @@ function recommendedStaff(cap) {
     'Maintenance Worker': Math.max(1, Math.ceil(cap / 100)),
     'Teacher': cap >= 100 ? 1 : 0,
     'Psychologist': cap >= 150 ? 1 : 0,
-    'Rehabilitation Specialist': cap >= 100 ? 1 : 0
+    'Rehabilitation Specialist': cap >= 100 ? 1 : 0,
+    'Psychiatrist': Math.ceil(sum(S.blocks.filter(b => b.cls === 'Insane' || b.cls === 'DeathRow'), blockCap) / 15)
   };
 }
 
@@ -494,7 +511,7 @@ function genInmate(cls) {
   const sent = Math.round(ri(s1, s2) * (1 + priors * .07) * (1 + (charges.length - 1) * .15));
   // traits
   const pool = [];
-  TRAIT_NAMES.forEach(t => { let w = 10; if (cls === 'Protective') { if (['Introverted', 'Anxious', 'Cooperative', 'Calm'].includes(t)) w = 18; if (['Aggressive', 'Rebellious'].includes(t)) w = 3; } if (cls === 'Supermax' || cls === 'Maximum') { if (['Aggressive', 'Rebellious', 'Manipulative', 'Leadership-oriented'].includes(t)) w = 18; if (['Cooperative', 'Calm'].includes(t)) w = 5; } if (cls === 'Minimum' && ['Cooperative', 'Calm', 'Hardworking', 'Introverted'].includes(t)) w = 16; pool.push([t, w]); });
+  TRAIT_NAMES.forEach(t => { let w = 10; if (cls === 'Insane') { if (['Aggressive', 'Anxious', 'Easily influenced', 'Rebellious'].includes(t)) w = 16; if (['Calm', 'Hardworking'].includes(t)) w = 4; } if (cls === 'Protective') { if (['Introverted', 'Anxious', 'Cooperative', 'Calm'].includes(t)) w = 18; if (['Aggressive', 'Rebellious'].includes(t)) w = 3; } if (cls === 'Supermax' || cls === 'Maximum') { if (['Aggressive', 'Rebellious', 'Manipulative', 'Leadership-oriented'].includes(t)) w = 18; if (['Cooperative', 'Calm'].includes(t)) w = 5; } if (cls === 'Minimum' && ['Cooperative', 'Calm', 'Hardworking', 'Introverted'].includes(t)) w = 16; pool.push([t, w]); });
   const traits = [wpick(pool)]; let t2; do { t2 = wpick(pool); } while (t2 === traits[0] || (t2 === 'Calm' && traits[0] === 'Anxious') || (t2 === 'Anxious' && traits[0] === 'Calm') || (t2 === 'Cooperative' && traits[0] === 'Rebellious') || (t2 === 'Rebellious' && traits[0] === 'Cooperative'));
   traits.push(t2);
   const traitRisk = sum(traits, t => (TRAITS[t].inc - 1) * 12);
@@ -502,7 +519,7 @@ function genInmate(cls) {
   const risk = riskScore < 30 ? 'Low' : riskScore < 48 ? 'Moderate' : riskScore < 66 ? 'High' : 'Extreme';
   const pre = Math.floor(sent * rnd() * .15);
   const d = curDay();
-  const gangP = { Minimum: .04, Medium: .14, Maximum: .3, Supermax: .45, Protective: 0 }[cls];
+  const gangP = { Minimum: .04, Medium: .14, Maximum: .3, Supermax: .45, Protective: 0, DeathRow: .15, Insane: 0 }[cls];
   const i = {
     id, fn, ln, age: ri(18, 64 - (rnd() < .6 ? 25 : 0)), g: S.pop, adm: d, cls, risk, charges, sev, priors, sent,
     start: d - pre, parole: d + Math.max(2, Math.ceil(sent * PAROLE_FRAC[cls]) - pre), release: d + sent - pre,
@@ -514,10 +531,16 @@ function genInmate(cls) {
     prog: null, progHrs: 0, progStart: 0, progHist: [], certs: [],
     friends: [], rivals: [], gang: rnd() < gangP ? pick(GANGS) : null,
     hist: [], hearing: null, infirm: false, sick: false, loc: 'Intake', paroleRec: 0, hearings: 0,
-    pc: cls === 'Protective' ? pick(PC_REASONS) : null
+    pc: cls === 'Protective' ? pick(PC_REASONS) : null,
+    psych: cls === 'Insane' ? ri(25, 60) : null, dx: cls === 'Insane' ? pick(INSANE_DX) : null, progWant: null, progWhy: null
   };
+  if (cls === 'DeathRow') {
+    i.charges = [pick(CAPITAL_CHARGES)].concat(rnd() < .4 ? [pick(CHARGES[4])] : []); i.sent = 0; i.parole = NEVER; i.release = NEVER;
+    i.appeal = { stage: 0, next: d + ri(20, 40), legal: 0, support: 0, log: [], exec: null };
+  }
+  if (cls === 'Insane') i.charges[0] += ' (found not guilty by reason of insanity)';
   if (i.pc === 'Vulnerable (age or health)') i.age = ri(58, 79);
-  ihist(i, `Admitted. Charges: ${charges.join(', ')}. Sentence ${sent} days.${i.pc ? ' Protective custody: ' + i.pc + '.' : ''}`);
+  ihist(i, `Admitted. Charges: ${i.charges.join(', ')}. ${cls === 'DeathRow' ? 'Sentenced to death; mandatory appeals begin.' : 'Sentence ' + i.sent + ' days.'}${i.pc ? ' Protective custody: ' + i.pc + '.' : ''}${i.dx ? ' Diagnosis: ' + i.dx + '.' : ''}`);
   return i;
 }
 function ihist(i, txt) { i.hist.unshift({ t: S.t, x: txt }); if (i.hist.length > 25) i.hist.length = 25; }
@@ -525,7 +548,17 @@ function itx(i, desc, amt) { i.bal += amt; i.tx.unshift({ d: curDay(), x: desc, 
 function iname(i) { return i.fn + ' ' + i.ln; }
 function getInm(id) { return S.inm.find(i => i.id === id); }
 function served(i) { return curDay() - i.start; }
-function remaining(i) { return Math.max(0, i.release - curDay()); }
+function remaining(i) { return i.release >= NEVER ? Infinity : Math.max(0, i.release - curDay()); }
+function sentenceStr(i) { return i.cls === 'DeathRow' ? 'Death sentence' : i.sent + ' days'; }
+function modeLabel(m) { return m === 'career' ? 'Career' : m === 'test' ? 'Test' : 'Sandbox'; }
+const INC_TYPES = ['Argument', 'Refusal to follow instructions', 'Fight', 'Property damage', 'Contraband', 'Assault on staff', 'Attempted escape', 'Assault on protective custody', 'Psychotic episode', 'Medical emergency'];
+function defaultDiscipline() {
+  return {
+    'Argument': { s: 'Verbal warning', days: 0 }, 'Refusal to follow instructions': { s: 'Loss of privileges', days: 2 }, 'Fight': { s: 'Solitary confinement', days: 3 },
+    'Property damage': { s: 'Restitution', days: 0 }, 'Contraband': { s: 'Investigation', days: 0 }, 'Assault on staff': { s: 'Solitary confinement', days: 7 },
+    'Attempted escape': { s: 'Refer for prosecution', days: 0 }, 'Assault on protective custody': { s: 'Solitary confinement', days: 7 }, 'Psychotic episode': { s: 'Psychiatric observation', days: 2 }, 'Medical emergency': { s: 'Medical evaluation', days: 0 }
+  };
+}
 
 function genStaff(role, exp) {
   const fn = pick(STAFF_FIRST), ln = pick(LAST);
@@ -619,6 +652,7 @@ function requirements() {
     'Teacher': Math.ceil(enrolledFor('Teacher') / 15),
     'Psychologist': Math.ceil(enrolledFor('Psychologist') / 11),
     'Rehabilitation Specialist': Math.ceil(enrolledFor('Rehabilitation Specialist') / 13),
+    'Psychiatrist': Math.ceil(S.inm.filter(i => i.cls === 'Insane' || i.cls === 'DeathRow').length / 15),
     'Warden': pop >= 80 ? 1 : 0
   };
 }
@@ -662,7 +696,7 @@ function processIntake() {
   if (!S.settings.intakeOn) return intakeSummary();
   for (const cls of CLASSES) {
     if (!S.unlock.classes.includes(cls)) continue;
-    const n = S.settings.intake[cls] | 0;
+    const v = +S.settings.intake[cls] || 0; const n = Math.floor(v) + (rnd() < v % 1 ? 1 : 0);
     for (let k = 0; k < n; k++) {
       const i = genInmate(cls);
       T.recv[cls] = (T.recv[cls] || 0) + 1;
@@ -714,9 +748,39 @@ function setJob(i, j) {
 }
 function progEnrolled(p) { return S.inm.filter(i => i.prog === p).length; }
 function progSeats(p) { return staffCount(PROGRAMS[p].role, true) * PROGRAMS[p].per; }
-function progEligible(i, p) { const c = S.progs[p]; return S.unlock.progs[p] && c.on && c.elig.includes(i.cls) && !i.certs.includes(p); }
+function progEligible(i, p) { const c = S.progs[p]; return S.unlock.progs[p] && c.on && c.elig.includes(i.cls) && (PROGRAMS[p].repeat || !i.certs.includes(p)); }
+function progRoom(p) { return progEnrolled(p) < Math.min(S.progs[p].cap, progSeats(p) || staffCount(PROGRAMS[p].role) * PROGRAMS[p].per); }
+/* Inmates choose programs based on their own personality, needs and history */
+function programWishes(i) {
+  const w = [];
+  const add = (p, score, why) => { if (progEligible(i, p) && staffCount(PROGRAMS[p].role) > 0) w.push({ p, score: score + rnd() * 2, why }); };
+  const t = x => i.traits.includes(x);
+  add('Anger Management', t('Aggressive') ? 6 : i.incCount > 2 ? 3 : 0, t('Aggressive') ? 'wants to control their temper' : 'wants to stay out of trouble');
+  add('Substance Recovery', i.charges.some(c => /Drug|alcohol|narcotic/i.test(c)) ? 6 : 0.5, i.charges.some(c => /Drug/i.test(c)) ? 'wants to beat an addiction' : 'curious about recovery support');
+  add('Vocational Training', t('Hardworking') ? 5 : i.age < 35 ? 2.5 : 1, t('Hardworking') ? 'wants to learn a trade' : 'wants job skills for release');
+  add('Education', t('Introverted') ? 4 : i.age < 26 ? 3.5 : 1.5, i.age < 26 ? 'wants to finish school' : 'enjoys studying');
+  add('Counseling', (t('Anxious') ? 4 : 0) + (i.n.stress > 60 ? 3 : 0), i.n.stress > 60 ? 'is struggling with stress' : 'wants someone to talk to');
+  add('Life Skills', t('Leadership-oriented') ? 3.5 : remaining(i) < 40 ? 4 : 1.5, remaining(i) < 40 ? 'is preparing for release' : 'wants practical skills');
+  add('Psychiatric Treatment', i.cls === 'Insane' ? 7 + (60 - (i.psych || 60)) / 10 : i.cls === 'DeathRow' ? 5 : 0, i.cls === 'Insane' ? 'was referred for ongoing psychiatric care' : 'wants support while facing a death sentence');
+  if (t('Manipulative')) w.forEach(x => { x.score += PROGRAMS[x.p].fx.parole / 4; x.why = 'thinks it will impress the parole board'; });
+  return w.sort((a, b) => b.score - a.score);
+}
+function inmateChooses(i) {
+  if (i.prog) return false;
+  const t = x => i.traits.includes(x);
+  if (t('Rebellious') && rnd() < .5) return false; // refuses this time
+  if (i.disc === 'Solitary') return false;
+  const w = programWishes(i); if (!w.length) return false;
+  const top = w[0];
+  if (progRoom(top.p)) { setProg(i, top.p, `chose it — ${top.why}`); i.progWant = null; return true; }
+  // Top choice full: cooperative/easily influenced inmates settle for second choice, others join the waitlist
+  if ((t('Cooperative') || t('Easily influenced')) && w[1] && progRoom(w[1].p)) { setProg(i, w[1].p, `${top.p} was full, settled for this — ${w[1].why}`); i.progWant = null; return true; }
+  if (i.progWant !== top.p) { i.progWant = top.p; i.progWhy = top.why; ihist(i, `Applied for ${top.p} (${top.why}); placed on the waitlist.`); }
+  return false;
+}
 function tryEnroll(i) {
   if (i.prog) return false;
+  if (S.settings.progChoice !== 'admin') return inmateChooses(i);
   let opts = PROG_NAMES.filter(p => progEligible(i, p) && progEnrolled(p) < Math.min(S.progs[p].cap, progSeats(p) || staffCount(PROGRAMS[p].role) * PROGRAMS[p].per));
   if (!opts.length) return false;
   // Targeted: aggressive → anger mgmt; drug charges → recovery
@@ -724,15 +788,15 @@ function tryEnroll(i) {
   opts.sort((a, b) => pref(a) - pref(b));
   setProg(i, opts[0]); return true;
 }
-function setProg(i, p) {
+function setProg(i, p, why) {
   if (i.prog) { i.progHist.unshift({ p: i.prog, start: i.progStart, end: curDay(), hrs: Math.round(i.progHrs), done: false }); ihist(i, `Withdrew from ${i.prog}.`); }
-  i.prog = p || null; i.progHrs = 0; i.progStart = curDay();
-  if (p) ihist(i, `Enrolled in ${p}.`);
+  i.prog = p || null; i.progHrs = 0; i.progStart = curDay(); i.progWhy = p ? (why || 'assigned by administration') : null;
+  if (p) { i.progWant = null; ihist(i, `Enrolled in ${p} (${i.progWhy}).`); }
 }
 function completeProg(i) {
   const p = i.prog, P = PROGRAMS[p];
   i.progHist.unshift({ p, start: i.progStart, end: curDay(), hrs: P.hrs, done: true }); if (i.progHist.length > 10) i.progHist.length = 10;
-  i.certs.push(p); i.beh = clamp(i.beh + P.fx.beh); i.paroleRec += P.fx.parole;
+  if (!i.certs.includes(p)) i.certs.push(p); i.beh = clamp(i.beh + P.fx.beh); i.paroleRec += P.fx.parole;
   if (P.fx.calm && i.traits.includes('Aggressive')) { i.traits[i.traits.indexOf('Aggressive')] = 'Calm'; ihist(i, 'Personality shift: Aggressive → Calm.'); }
   if (P.fx.stress) i.n.stress = clamp(i.n.stress - 20);
   ihist(i, `Completed ${p}. Earned: ${P.cert}.`);
@@ -853,7 +917,7 @@ function hourTick(h) {
         { const w = S.jobs[i.job].wage; wages += w; i.earn += w; i.bal += w; if (i.job === 'Workshop') workshopHrs++; if (rnd() < .01) i.beh = clamp(i.beh + 1); }
         break;
       case 'Rehab':
-        if (seats[i.prog] > 0) { seats[i.prog]--; i.progHrs++; n.stress -= 3; if (i.progHrs >= PROGRAMS[i.prog].hrs) completeProg(i); }
+        if (seats[i.prog] > 0) { seats[i.prog]--; i.progHrs++; n.stress -= 3; if (i.prog === 'Psychiatric Treatment') { n.stress -= 3; if (i.psych != null) i.psych = clamp(i.psych + 1); } if (i.progHrs >= PROGRAMS[i.prog].hrs) completeProg(i); }
         else { hourFlags.progShort = hourFlags.progShort || {}; hourFlags.progShort[i.prog] = true; }
         break;
       case 'Visits':
@@ -928,7 +992,10 @@ function rollIncident(i, b, cov, act, rivalsHere) {
   p *= { Yard: 1.6, Recreation: 1.4, Free: 1.4, Meal: 1.25, Work: .8, Rehab: .6, Lockdown: .5, Solitary: .15, Visits: 1.1, Shower: 1.1, Idle: 1.2, Wake: .8 }[act] || 1;
   p *= 1 + rivalsHere * .3 + b.contraband / 120;
   if (i.disc === 'Solitary') p *= .3;
+  if (i.cls === 'Insane') p *= 1 + Math.max(0, 55 - (i.psych || 50)) / 10;
+  if (i.cls === 'DeathRow' && i.appeal && i.appeal.exec) p *= 1.8;
   if (rnd() < p) {
+    if (i.cls === 'Insane') { makeIncident(i, b, wpick([['Psychotic episode', 35 + Math.max(0, 50 - (i.psych || 50))], ['Fight', 18], ['Assault on staff', 14], ['Property damage', 15], ['Argument', 15], ['Refusal to follow instructions', 10]]), cov); return; }
     if (i.cls === 'Protective') { makeIncident(i, b, wpick([['Argument', 40], ['Refusal to follow instructions', 30], ['Property damage', 10], ['Contraband', 10]]), cov); return; }
     const type = wpick([
       ['Argument', 30], ['Refusal to follow instructions', 20 * (i.traits.includes('Rebellious') ? 2 : 1)],
@@ -970,6 +1037,7 @@ function makeIncident(i, b, type, cov) {
     }
     case 'Property damage': { sev = 'Moderate'; const cost = ri(150, 1800) * (staffCount('Maintenance Worker') ? 1 : 1.5); money(-cost, 'Maintenance', `Repairs: ${b.name}`); desc = `${iname(i)} damaged ${pick(['cell fixtures', 'a door lock', 'the TV room', 'kitchen equipment', 'a window', 'plumbing'])}. Repair cost ${fmt$(cost)}.`; break; }
     case 'Contraband': sev = rnd() < .3 ? 'Major' : 'Moderate'; desc = `Contraband found on ${iname(i)}: ${pick(['mobile phone', 'homemade weapon', 'narcotics', 'tobacco', 'homemade alcohol', 'unauthorised medication'])}.`; b.contraband = clamp(b.contraband - 5); S.today.contraband++; break;
+    case 'Psychotic episode': sev = (i.psych || 50) < 25 ? 'Major' : 'Moderate'; desc = `${iname(i)} suffered a psychotic episode (${pick(['paranoid delusions', 'severe agitation', 'auditory hallucinations', 'barricaded in cell', 'self-neglect and confusion', 'violent outburst'])}).`; i.psych = clamp((i.psych || 50) - 8); mates.forEach(m => m.n.safety = clamp(m.n.safety - 3)); break;
     case 'Assault on staff': sev = 'Major'; desc = `${iname(i)} assaulted a correctional officer.`; { const o = pick(S.staff.filter(s => s.role === 'Correctional Officer' && s.assign === b.id)); if (o) { o.morale = clamp(o.morale - 15); desc = `${iname(i)} assaulted Officer ${o.ln}.`; } } break;
     case 'Attempted escape': {
       sev = 'Critical';
@@ -1015,24 +1083,40 @@ function escape(i, b) {
 }
 const SANCTIONS = {
   'Verbal warning': { beh: -2, d: 'Formal warning recorded' },
-  'Loss of privileges': { beh: -5, days: 3, disc: 'Restricted', d: 'No recreation, free time or visits for 3 days' },
-  'Solitary confinement': { beh: -8, days: 5, disc: 'Solitary', stress: 15, d: '5 days in segregation' },
+  'Fine': { beh: -2, fine: 25, d: 'Deduct $25 from the inmate account' },
+  'Restitution': { beh: -3, fine: 60, d: 'Inmate pays up to $60 toward damages' },
+  'Loss of job': { beh: -4, job: true, d: 'Removed from work assignment' },
+  'Loss of privileges': { beh: -5, days: 3, dur: true, disc: 'Restricted', d: 'No yard, recreation, free time or visits' },
+  'Solitary confinement': { beh: -8, days: 5, dur: true, disc: 'Solitary', stress: 15, d: 'Held in segregation' },
+  'Psychiatric observation': { beh: 0, days: 2, dur: true, disc: 'Restricted', psych: 18, cost: 200, d: 'Observation and medication review (helps unstable inmates)' },
   'Investigation': { cost: 300, d: 'Officers investigate: may uncover contraband and gang activity' },
   'Medical evaluation': { cost: 250, d: 'Send to infirmary for assessment' },
   'Refer for prosecution': { beh: -12, sent: [20, 90], d: 'Adds 20–90 days to sentence' },
   'Dismiss': { d: 'Close without sanction' }
 };
 function standardSanction(inc) {
+  const pol = S.settings.disc && S.settings.disc[inc.type]; if (pol && SANCTIONS[pol.s]) return pol.s;
   if (inc.type === 'Contraband') return 'Investigation';
   if (inc.type === 'Medical emergency') return 'Medical evaluation';
   if (inc.sev === 'Critical') return inc.type === 'Attempted escape' ? 'Refer for prosecution' : 'Solitary confinement';
   if (inc.sev === 'Major') return 'Solitary confinement';
   return 'Loss of privileges';
 }
-function applySanction(inc, s, auto) {
-  const i = getInm(inc.who); const X = SANCTIONS[s];
-  inc.status = 'Closed'; inc.action = s + (auto ? ' (auto)' : '');
+function sanctionDays(inc, s) {
+  const X = SANCTIONS[s]; if (!X.dur) return 0;
+  const pol = S.settings.disc && S.settings.disc[inc.type];
+  let d = pol && pol.s === s && pol.days ? pol.days : X.days;
+  if (S.settings.escalate && (inc.sev === 'Major' || inc.sev === 'Critical')) d *= 2;
+  return d;
+}
+function applySanction(inc, s, auto, daysOverride) {
+  const i = getInm(inc.who); const X = Object.assign({}, SANCTIONS[s]);
+  if (X.dur) X.days = daysOverride || sanctionDays(inc, s);
+  inc.status = 'Closed'; inc.action = s + (X.dur ? ` (${X.days}d)` : '') + (auto ? ' (auto)' : '');
   if (!i) return;
+  if (X.fine) { const a = Math.min(Math.max(0, i.bal), X.fine); if (a > 0) itx(i, `${s} for ${inc.id}`, -a); }
+  if (X.job && i.job) setJob(i, null);
+  if (X.psych && i.psych != null) i.psych = clamp(i.psych + X.psych);
   if (X.cost) money(-X.cost, s === 'Investigation' ? 'Security operations' : 'Healthcare', `${s} ${inc.id}`);
   if (X.beh) i.beh = clamp(i.beh + X.beh);
   if (X.disc) { const rank = { Good: 0, Warning: 1, Restricted: 2, Solitary: 3 }; if (rank[X.disc] >= rank[i.disc]) { i.disc = X.disc; i.discUntil = curDay() + X.days; } if (X.disc === 'Solitary') { if (i.job) setJob(i, null); } }
@@ -1044,7 +1128,7 @@ function applySanction(inc, s, auto) {
     if (i.gang && rnd() < .5) { const members = S.inm.filter(x => x.gang === i.gang && x.blk === i.blk); members.forEach(m => { m.beh = clamp(m.beh - 2); }); inc.action += ` — linked to ${i.gang}`; }
   }
   if (s === 'Medical evaluation') { i.infirm = true; }
-  if (s !== 'Dismiss') ihist(i, `Sanction for ${inc.id}: ${s}.`);
+  if (s !== 'Dismiss') ihist(i, `Sanction for ${inc.id}: ${s}${X.dur ? ' for ' + X.days + ' days' : ''}.`);
   if (s === 'Dismiss') { i.beh = clamp(i.beh + 2); }
 }
 
@@ -1074,6 +1158,7 @@ function paroleScore(i) {
   if (i.job) s += 6 + Math.min(8, (curDay() - i.jobSince) / 5);
   if (i.disc === 'Solitary') s -= 20; else if (i.disc === 'Restricted') s -= 10;
   s += i.recommend || 0;
+  if (i.cls === 'Insane') s += ((i.psych || 0) - 55) * .5;
   return Math.round(clamp(s, 0, 100));
 }
 function holdHearing(i) {
@@ -1191,13 +1276,23 @@ function dayTick() {
     if (b.status === 'Construction') { b.buildLeft--; if (b.buildLeft <= 0) { b.status = 'Open'; note('good', `${b.name} construction complete — ${blockCap(b)} ${b.cls} beds now available.`); } }
     if (b.upgrade) { b.upgrade.left--; if (b.upgrade.left <= 0) { b.tier = b.upgrade.to; b.upgrade = null; note('good', `${b.name} upgraded to Tier ${b.tier} (${TIERS[b.tier].name}).`); } }
   });
+  // --- Psychiatric care for criminally insane inmates
+  const ci = S.inm.filter(i => i.cls === 'Insane');
+  ci.forEach(i => { i.psych = clamp((i.psych == null ? 40 : i.psych) - 6 - (i.n.stress > 60 ? 3 : 0)); });
+  let rounds = staffCount('Psychiatrist', true) * 15;
+  ci.slice().sort((a, b) => a.psych - b.psych).forEach(i => { if (rounds > 0) { rounds--; i.psych = clamp(i.psych + 5); } });
+  if (ci.length && !staffCount('Psychiatrist')) note('bad', `${ci.length} criminally insane inmates have no psychiatrist. Their condition will deteriorate and incidents will rise — hire a Psychiatrist.`);
+  // --- Death row appeals
+  S.inm.filter(i => i.cls === 'DeathRow' && i.appeal).slice().forEach(i => processAppeal(i, d));
+  // --- Inmate-chosen programs: waitlisted inmates try again, some drop out
+  if (S.settings.autoEnroll) S.inm.forEach(i => { if (i.prog && i.traits.includes('Rebellious') && rnd() < .02) { ihist(i, `Dropped out of ${i.prog}.`); setProg(i, null); } });
   // --- Weather
   S.weather = wpick(WEATHER);
   if (S.weather === 'Storm' && CLASSES.some(c => S.sched[c].includes('Yard'))) note('info', 'Storm forecast today: yard time moves indoors to recreation.');
   // --- Protective custody requests
   if (S.unlock.classes.includes('Protective')) {
     S.inm.forEach(i => {
-      if (i.cls === 'Protective' || i.pcRequest) return;
+      if (i.cls === 'Protective' || i.cls === 'DeathRow' || i.cls === 'Insane' || i.pcRequest) return;
       const threat = i.rivals.filter(r => { const x = getInm(r); return x && x.blk === i.blk; }).length;
       const p = (i.n.safety < 30 ? .025 : 0) + threat * .008 + (i.traits.includes('Anxious') && i.n.safety < 45 ? .006 : 0);
       if (rnd() < p) { i.pcRequest = { d, why: pick(threat ? ['Threatened by rivals in the block', 'Debt to another inmate', 'Agreed to testify; fears retaliation'] : ['Fears for personal safety', 'Labelled an informant by other inmates', 'Left a gang and fears retaliation']) }; ihist(i, `Requested protective custody: ${i.pcRequest.why}.`); note('warn', `${iname(i)} (${i.id}) has requested protective custody: ${i.pcRequest.why}. Review it on the Security page.`); }
@@ -1346,6 +1441,62 @@ function transferToPC(i) {
   ihist(i, `Transferred from ${old} to Protective Custody (${cellLabel(i)}).`);
   return true;
 }
+
+/* ---------- Death row appeals ---------- */
+function appealOdds(i) {
+  const a = i.appeal; const st = a.stage;
+  let p = [.1, .07, .06, .04][st] || .04;
+  p += a.legal * .05;                       // funded legal representation
+  if (st === 3) p += a.support ? .1 : 0;    // administration supports clemency
+  if (i.beh > 70) p += .03;
+  if (i.certs.includes('Psychiatric Treatment') || i.prog === 'Psychiatric Treatment') p += .03;
+  if (i.incCount > 3) p -= .03;
+  return clamp(p, .01, .6);
+}
+function processAppeal(i, d) {
+  const a = i.appeal;
+  if (i.commuted) { const sp = findBed('Maximum'); if (sp) { i.cls = 'Maximum'; place(i, sp.b, sp.c); i.appeal = null; i.pendingMove = null; ihist(i, `Moved to ${cellLabel(i)} after commutation.`); } return; }
+  if (a.exec) {
+    if (d >= a.exec) {
+      if (rnd() < .05 + a.legal * .02) { a.exec = null; a.stage = 2; a.next = d + ri(20, 40); a.log.unshift({ d, x: 'Last-minute stay granted by the court. New federal review scheduled.' }); ihist(i, 'Execution stayed by the court.'); note('info', `Execution of ${iname(i)} (${i.id}) was stayed by the court.`); return; }
+      a.log.unshift({ d, x: 'Sentence carried out.' });
+      money(-15000, 'Legal & judicial', `Execution procedure ${i.id}`);
+      ihist(i, 'Death sentence carried out.');
+      S.stats.executions = (S.stats.executions || 0) + 1;
+      S.inm.forEach(x => { if (x.blk === i.blk && x.id !== i.id) x.n.stress = clamp(x.n.stress + 12); });
+      releaseInmate(i, 'Executed');
+      note('warn', `Death sentence carried out: ${iname(i)} (${i.id}), Day ${d}.`);
+    }
+    return;
+  }
+  if (d < a.next) return;
+  const stage = APPEAL_STAGES[a.stage];
+  if (rnd() < appealOdds(i)) {
+    a.log.unshift({ d, x: `${stage}: GRANTED. Death sentence commuted to life imprisonment.` });
+    ihist(i, `${stage} granted — sentence commuted to life.`);
+    commute(i);
+    note('good', `${iname(i)} (${i.id}) won their ${stage.toLowerCase()}. Sentence commuted to life; moved to Maximum security${i.cls === 'DeathRow' ? ' (no free bed yet — remains on death row until one opens)' : ''}.`);
+    return;
+  }
+  a.log.unshift({ d, x: `${stage}: denied.` });
+  ihist(i, `${stage} denied.`);
+  a.stage++; a.legal = 0;
+  if (a.stage >= APPEAL_STAGES.length) {
+    a.exec = d + 14; a.log.unshift({ d, x: `All appeals exhausted. Execution scheduled for Day ${a.exec}.` });
+    i.n.stress = clamp(i.n.stress + 25);
+    note('warn', `All appeals exhausted for ${iname(i)} (${i.id}). Execution scheduled for Day ${a.exec}.`);
+  } else {
+    a.next = d + ri(20, 35);
+    note('info', `${iname(i)} (${i.id}): ${stage.toLowerCase()} denied. Next: ${APPEAL_STAGES[a.stage]} on Day ${a.next}.`);
+  }
+}
+function commute(i) {
+  i.commuted = true;
+  const spot = findBed('Maximum');
+  i.sent = 900; i.start = curDay(); i.release = curDay() + 900; i.parole = curDay() + 630;
+  if (spot) { i.cls = 'Maximum'; place(i, spot.b, spot.c); i.appeal.done = true; i.appeal = null; ihist(i, `Moved to ${cellLabel(i)}.`); }
+  else { i.pendingMove = 'Maximum'; }
+}
 /* ================= UI helpers ================= */
 const UI = { view: 'dashboard', modal: null, prof: null, profTab: 'Overview', repTab: 'Daily', dirty: false };
 const A = {}; // click actions
@@ -1453,9 +1604,9 @@ function issues() {
 
 /* ================= Views ================= */
 const NAV = [
-  ['dashboard', 'Dashboard'], ['inmates', 'Inmates'], ['intake', 'Intake'], ['housing', 'Housing'], ['security', 'Security'],
+  ['dashboard', 'Dashboard'], ['inmates', 'Inmates'], ['intake', 'Intake'], ['housing', 'Housing'], ['security', 'Security'], ['discipline', 'Discipline'],
   ['personnel', 'Personnel'], ['regimes', 'Regimes'], ['kitchen', 'Kitchen'], ['employment', 'Employment'], ['rehabilitation', 'Rehabilitation'],
-  ['healthcare', 'Healthcare'], ['visitors', 'Visitors'], ['parole', 'Parole'], ['finance', 'Finance'], ['reports', 'Reports'], ['administration', 'Administration']
+  ['healthcare', 'Healthcare'], ['visitors', 'Visitors'], ['parole', 'Parole & Appeals'], ['finance', 'Finance'], ['reports', 'Reports'], ['administration', 'Administration'], ['testing', 'Test Mode']
 ];
 const V = {};
 
@@ -1466,7 +1617,7 @@ V.dashboard = () => {
   const cov = avgCoverage();
   const sat = pop ? avg(S.inm, satisfaction) : 0;
   const iss = issues();
-  let h = `<h1>Dashboard</h1><p class="sub">${esc(S.name)} · ${S.mode === 'career' ? 'Career' : 'Sandbox'} mode · ${S.pop} facility · Day ${curDay()} (${DOW[dow()]}) · Weather: ${S.weather || 'Clear'}</p>`;
+  let h = `<h1>Dashboard</h1><p class="sub">${esc(S.name)} · ${modeLabel(S.mode)} mode · ${S.pop} facility · Day ${curDay()} (${DOW[dow()]}) · Weather: ${S.weather || 'Clear'}</p>`;
   if (S.speed === 0 && S.t === 360) h += `<div class="alert info">The clock is paused. Press <b>1x</b> (or faster) at the top to start the simulation. First inmates arrive at 08:00.</div>`;
   h += `<div class="grid g4 mb">
     ${kpi('Population', `${pop}<span class="mut small"> / ${cap}</span>`, `${S.queue.length} pending · ${cap ? Math.round(pop / cap * 100) : 0}% occupied`)}
@@ -1530,8 +1681,8 @@ V.inmates = () => {
     { l: 'Status', v: i => i.infirm ? 'Infirmary' : i.disc, h: i => i.infirm ? '<span class="info">Infirmary</span>' : `<span class="${i.disc === 'Solitary' ? 'bad' : i.disc === 'Restricted' ? 'warn' : i.disc === 'Warning' ? 'mut' : 'good'}">${i.disc}</span>` },
     { l: 'Job', v: i => i.job || '—' },
     { l: 'Program', v: i => i.prog || '—' },
-    { l: 'Days left', v: i => remaining(i), r: 1, h: i => `<span class="mono">${remaining(i)}</span>` },
-    { l: 'Parole', v: i => i.parole, r: 1, h: i => i.hearing ? '<span class="warn">Due</span>' : `<span class="mono">D${i.parole}</span>` }
+    { l: 'Days left', v: i => remaining(i), r: 1, h: i => i.cls === 'DeathRow' && !i.commuted ? '<span class="bad">Death</span>' : `<span class="mono">${remaining(i)}</span>` },
+    { l: 'Parole', v: i => i.parole, r: 1, h: i => i.appeal ? (i.appeal.exec ? `<span class="bad">Exec D${i.appeal.exec}</span>` : `<span class="info">Appeal ${i.appeal.stage + 1}/4</span>`) : i.hearing ? '<span class="warn">Due</span>' : `<span class="mono">D${i.parole}</span>` }
   ];
   return `<h1>Inmates</h1><p class="sub">${S.inm.length} inmates in custody · ${S.queue.length} pending admission · ${S.released.length} released records. Click a row to open the inmate's permanent record.</p>` +
     tbl('inm', S.inm, cols, {
@@ -1568,11 +1719,12 @@ function renderProfile(i, queued) {
       <div>Admitted</div><div>Day ${i.adm}</div><div>Location</div><div>${esc(i.loc)}</div></div>
       <h3 class="mt">Criminal history</h3><div class="kv">
       <div>Charges</div><div style="white-space:normal">${i.charges.map(esc).join('<br>')}</div><div>Offense severity</div><div>${SEV_LABEL[i.sev]} (${i.sev}/5)</div>
-      <div>Prior convictions</div><div>${i.priors}</div><div>Sentence</div><div>${i.sent} days</div><div>Time served</div><div>${served(i)} days</div>
-      <div>Remaining</div><div>${remaining(i)} days (release Day ${i.release})</div><div>Parole eligibility</div><div>Day ${i.parole}${i.hearing ? ' — <span class="warn">hearing due</span>' : ''}</div>
-      <div>Parole outlook</div><div>${paroleScore(i)}/100</div></div></div>
+      <div>Prior convictions</div><div>${i.priors}</div><div>Sentence</div><div>${sentenceStr(i)}</div><div>Time served</div><div>${served(i)} days</div>
+      ${i.appeal ? `<div>Appeal stage</div><div>${i.appeal.exec ? `<span class="bad">Execution scheduled Day ${i.appeal.exec}</span>` : `${APPEAL_STAGES[i.appeal.stage]} — hearing Day ${i.appeal.next}`}</div><div>Appeal odds</div><div>${Math.round(appealOdds(i) * 100)}% at this stage</div>` : `<div>Remaining</div><div>${remaining(i)} days (release Day ${i.release})</div><div>Parole eligibility</div><div>Day ${i.parole}${i.hearing ? ' — <span class="warn">hearing due</span>' : ''}</div>
+      <div>Parole outlook</div><div>${paroleScore(i)}/100</div>`}</div>
+      ${i.appeal && i.appeal.log.length ? `<h3 class="mt">Appeal record</h3>${i.appeal.log.map(x => `<div class="small">Day ${x.d}: ${esc(x.x)}</div>`).join('')}` : ''}</div>
       <div><h3>Security</h3><div class="kv">
-      <div>Classification</div><div>${tag(i.cls)} ${CLS_LABEL[i.cls]}</div>${i.pc ? `<div>PC reason</div><div class="info">${esc(i.pc)}</div>` : ''}${i.pcRequest ? `<div>PC request</div><div class="warn">${esc(i.pcRequest.why)} (Day ${i.pcRequest.d})</div>` : ''}<div>Block / cell</div><div>${esc(cellLabel(i))}</div><div>Risk</div><div>${i.risk}</div>
+      <div>Classification</div><div>${tag(i.cls)} ${CLS_LABEL[i.cls]}</div>${i.pc ? `<div>PC reason</div><div class="info">${esc(i.pc)}</div>` : ''}${i.dx ? `<div>Diagnosis</div><div class="info">${esc(i.dx)}</div><div>Psychiatric stability</div><div>${Math.round(i.psych)}/100 ${i.psych < 35 ? '<span class="bad">unstable</span>' : i.psych < 55 ? '<span class="warn">fragile</span>' : '<span class="good">stable</span>'}</div>` : ''}${i.pcRequest ? `<div>PC request</div><div class="warn">${esc(i.pcRequest.why)} (Day ${i.pcRequest.d})</div>` : ''}<div>Block / cell</div><div>${esc(cellLabel(i))}</div><div>Risk</div><div>${i.risk}</div>
       <div>Behavior score</div><div>${Math.round(i.beh)}/100</div><div>Disciplinary</div><div>${i.disc}${i.discUntil > curDay() ? ` until Day ${i.discUntil}` : ''}</div>
       <div>Incidents</div><div>${i.incCount}</div><div>Personality</div><div>${i.traits.join(', ')}</div><div>Affiliation</div><div>${i.gang || 'None known'}</div></div>`;
     if (!queued) {
@@ -1580,7 +1732,7 @@ function renderProfile(i, queued) {
       S.blocks.filter(b => b.cls === i.cls && (b.status === 'Open' || b.status === 'Lockdown')).forEach(b => b.cells.forEach(c => { if (c.occ.length < c.beds && !(b.id === i.blk && c.n === i.cell)) spots.push([b.id + ':' + c.n, `${b.name} · Cell ${c.n} (${c.occ.length}/${c.beds})`]); }));
       h += `<h3 class="mt">Actions</h3>
         <div class="field"><label class="f">Move to cell</label><div class="row">${spots.length ? sel('pMoveSel', '', [['', 'Choose a free bed…']].concat(spots.slice(0, 300))) : '<span class="small mut">No free beds in this classification.</span>'}</div></div>
-        ${i.cls !== 'Protective' && S.unlock.classes.includes('Protective') ? `<div class="field"><label class="f">Protective custody</label><div class="row">${btn('Transfer to protective custody', 'pcApprove', i.id, 'sm')}<span class="tiny dim">${freeBeds('Protective')} PC beds free</span></div></div>` : ''}
+        ${!['Protective', 'DeathRow', 'Insane'].includes(i.cls) && S.unlock.classes.includes('Protective') ? `<div class="field"><label class="f">Protective custody</label><div class="row">${btn('Transfer to protective custody', 'pcApprove', i.id, 'sm')}<span class="tiny dim">${freeBeds('Protective')} PC beds free</span></div></div>` : ''}
         <div class="field"><label class="f">Reclassify</label><div class="row">${sel('pReclass', i.cls, S.unlock.classes.map(c => [c, CLS_LABEL[c]]))}<span class="tiny dim">Moves to a free bed in the new classification.</span></div></div>
         <div class="field"><label class="f">Disciplinary sanction</label><div class="row">${sel('pSanctionSel', UI.pSan || 'Verbal warning', Object.keys(SANCTIONS).filter(s => s !== 'Dismiss'))}${btn('Apply', 'pSanction', i.id, 'sm')}</div></div>`;
     }
@@ -1614,7 +1766,7 @@ function renderProfile(i, queued) {
 A.inmate = id => { UI.profTab = 'Overview'; openInmate(id); };
 A.ptab = t => { UI.profTab = t; openInmate(UI.prof); };
 C.pMoveSel = v => { if (!v) return; const i = getInm(UI.prof); const [bid, n] = v.split(':'); const b = getBlock(bid); const c = b && b.cells.find(c => c.n === +n); if (i && c && c.occ.length < c.beds) { place(i, b, c); ihist(i, `Moved to ${cellLabel(i)}.`); dirty(); toast('good', `${iname(i)} moved to ${cellLabel(i)}.`); } openInmate(UI.prof); };
-C.pReclass = v => { const i = getInm(UI.prof); if (!i || v === i.cls) return; const spot = findBed(v); if (!spot) { toast('bad', `No free ${v} beds. Build or expand a ${v} block first.`); openInmate(UI.prof); return; } const old = i.cls; i.cls = v; place(i, spot.b, spot.c); i.parole = i.start + Math.ceil(i.sent * PAROLE_FRAC[v]); ihist(i, `Reclassified ${old} → ${v}. Moved to ${cellLabel(i)}.`); if (i.job && !jobEligible(i, i.job)) setJob(i, null); dirty(); openInmate(UI.prof); };
+C.pReclass = v => { const i = getInm(UI.prof); if (!i || v === i.cls) return; if (v === 'DeathRow' || (i.cls === 'DeathRow' && !i.commuted)) { toast('bad', 'Death sentences are set by the courts — inmates cannot be moved on or off death row administratively.'); openInmate(UI.prof); return; } if (v === 'Insane' && i.psych == null) { i.psych = 40; i.dx = pick(INSANE_DX); } const spot = findBed(v); if (!spot) { toast('bad', `No free ${v} beds. Build or expand a ${v} block first.`); openInmate(UI.prof); return; } const old = i.cls; i.cls = v; place(i, spot.b, spot.c); i.parole = i.start + Math.ceil(i.sent * PAROLE_FRAC[v]); ihist(i, `Reclassified ${old} → ${v}. Moved to ${cellLabel(i)}.`); if (i.job && !jobEligible(i, i.job)) setJob(i, null); dirty(); openInmate(UI.prof); };
 C.pSanctionSel = v => { UI.pSan = v; };
 A.pSanction = id => { const i = getInm(id); if (!i) return; const s = UI.pSan || 'Verbal warning'; const inc = incident(i, 'Administrative sanction', `Sanction issued by administration: ${s}.`, 'Minor', getBlock(i.blk)); applySanction(inc, s); dirty(); toast('info', `${s} applied to ${iname(i)}.`); openInmate(id); };
 C.pJob = v => { const i = getInm(UI.prof); if (!i) return; setJob(i, v || null); dirty(); openInmate(UI.prof); };
@@ -1629,10 +1781,11 @@ V.intake = () => {
   h += `<div class="grid g2 mb"><div class="card"><h3>Daily intake allowance</h3>
     <div class="field">${chk('intakeOn', S.settings.intakeOn, 'Automatic intake enabled')}</div>
     <div class="twrap"><table><thead><tr><th>Classification</th><th class="right">Per day</th><th class="right">Free beds</th></tr></thead><tbody>
-    ${cls.map(c => `<tr><td>${tag(c)} ${CLS_LABEL[c]}</td><td class="right">${num('intakeN', S.settings.intake[c], c, 0, 100)}</td><td class="right mono">${freeBeds(c)}</td></tr>`).join('')}
+    ${cls.map(c => `<tr><td>${tag(c)} ${CLS_LABEL[c]}</td><td class="right">${num('intakeN', S.settings.intake[c], c, 0, 100, .1)}</td><td class="right mono">${freeBeds(c)}</td></tr>`).join('')}
     </tbody></table></div>
     <div class="field mt"><label class="f">When no suitable bed is available</label>${seg('overflow', S.settings.overflow, [['queue', 'Hold in pending queue'], ['reject', 'Redirect to other facilities']])}</div>
     <div class="row small mut">Queue limit ${num('queueMax', S.settings.queueMax, '', 0, 500, 1, 70)} · transfer after ${num('queueDays', S.settings.queueDays, '', 1, 30, 1, 60)} days waiting</div>
+    <div class="tiny dim mt6">Decimals mean a chance per day: 0.2 = one admission roughly every five days.</div>
     <div class="alert info mt">Processing capacity: <b>${intakeCapacity()}</b> admissions/day (15 base + 25 per Administrator present). Total requested: ${sum(cls, c => S.settings.intake[c])}/day.</div></div>
     <div class="card"><h3>${curHour() >= 8 ? "Today's" : "Yesterday's"} intake summary</h3>
     <div class="grid g2"><div>${kpi('Received', recv)}</div><div>${kpi('Pending queue', S.queue.length)}</div></div>
@@ -1653,7 +1806,7 @@ V.intake = () => {
   return h;
 };
 C.intakeOn = (v, el) => { S.settings.intakeOn = el.checked; dirty(); };
-C.intakeN = (v, el, c) => { S.settings.intake[c] = clamp(parseInt(v) || 0, 0, 100); dirty(); };
+C.intakeN = (v, el, c) => { S.settings.intake[c] = Math.round(clamp(parseFloat(v) || 0, 0, 100) * 10) / 10; dirty(); };
 C.queueMax = v => { S.settings.queueMax = clamp(parseInt(v) || 0, 0, 500); dirty(); };
 C.queueDays = v => { S.settings.queueDays = clamp(parseInt(v) || 1, 1, 30); dirty(); };
 
@@ -1794,6 +1947,7 @@ V.personnel = () => {
 const ROLE_HELP = {
   'Correctional Officer': 'Supervise blocks on day/night shifts', 'Warden': 'Boosts staff morale and attendance', 'Administrator': '+25 intake processing per day',
   'Medical Staff': 'Treat up to 6 patients/hour; 1 per 40 inmates', 'Psychologist': 'Runs Anger Management & Counseling', 'Teacher': 'Runs Education & Vocational Training',
+  'Psychiatrist': 'Treats criminally insane & death row inmates; daily rounds stabilize 15 patients',
   'Kitchen Worker': 'Serves ~40 meals per sitting', 'Maintenance Worker': '1 per 75 beds; shortages raise costs', 'Rehabilitation Specialist': 'Runs Life Skills & Substance Recovery'
 };
 A.hire = id => { const c = S.cands.find(x => x.id === id); if (!c) return; if (S.money < 500) return toast('bad', 'Not enough funds.'); S.cands = S.cands.filter(x => x !== c); c.hired = curDay(); c.present = true; S.staff.push(c); money(-500, 'Administration', `Hire ${c.role} ${c.fn} ${c.ln}`); if (c.role === 'Correctional Officer') assignNewOfficer(c); note('info', `Hired ${c.role} ${c.fn} ${c.ln}.`); dirty(); render(); };
@@ -1911,7 +2065,9 @@ A.clearJobs = () => { S.inm.filter(i => i.job).forEach(i => setJob(i, null)); di
 /* ---------- Rehabilitation ---------- */
 V.rehabilitation = () => {
   const enr = S.inm.filter(i => i.prog);
-  let h = `<h1>Rehabilitation programs</h1><p class="sub">${enr.length} inmates enrolled · ${S.stats.completions} programs completed. Sessions run during Rehabilitation periods; each staff member can teach a set number of inmates per hour.</p>`;
+  const wait = S.inm.filter(i => !i.prog && i.progWant);
+  let h = `<h1>Rehabilitation programs</h1><p class="sub">${enr.length} inmates enrolled · ${wait.length} on waitlists · ${S.stats.completions} programs completed. Sessions run during Rehabilitation periods; each staff member can teach a set number of inmates per hour.</p>`;
+  h += `<div class="card mb"><div class="spread"><div><h3 style="margin:0">Who chooses programs?</h3><div class="small mut mt6">${S.settings.progChoice === 'admin' ? 'Administration places inmates in the program it thinks they need.' : 'Inmates apply for programs themselves, based on their personality, charges, stress and release date. If their first choice is full they join its waitlist (cooperative inmates may settle for a second choice). Rebellious inmates sometimes refuse or drop out.'}</div></div>${seg('progChoice', S.settings.progChoice || 'inmate', [['inmate', 'Inmates choose'], ['admin', 'Administration assigns']])}</div></div>`;
   h += `<div class="card mb"><div class="twrap"><table><thead><tr><th>Program</th><th>Run by</th><th class="right">Staff</th><th class="right">Seats/hr</th><th class="right">Enrolled</th><th class="right">Max enrol</th><th class="right">Hours</th><th class="right">Done</th><th>Open</th><th>Eligible</th></tr></thead><tbody>
     ${PROG_NAMES.map(p => { const P = PROGRAMS[p], c = S.progs[p], lock = !S.unlock.progs[p]; const seats = progSeats(p), e = progEnrolled(p); return `<tr${lock ? ' style="opacity:.5"' : ''}><td><b>${p}</b>${lock ? ' <span class="tiny warn">locked</span>' : ''}<div class="tiny dim">${P.cert}</div></td><td class="small">${P.role}</td><td class="right mono ${!staffCount(P.role) ? 'warn' : ''}">${staffCount(P.role)}</td>
       <td class="right mono">${seats}</td><td class="right mono ${e > seats ? 'warn' : ''}">${e}</td><td class="right">${num('progCap', c.cap, p, 0, 500, 1, 64)}</td><td class="right mono">${P.hrs}</td><td class="right mono">${c.completions}</td>
@@ -1921,10 +2077,15 @@ V.rehabilitation = () => {
   h += `<div class="card">${tbl('enr', enr, [
     { l: 'ID', v: i => i.id, h: i => `<span class="mono">${i.id}</span>` }, { l: 'Name', v: i => iname(i) }, { l: 'Class', v: i => i.cls, h: i => tag(i.cls) }, { l: 'Program', v: i => i.prog },
     { l: 'Progress', v: i => i.progHrs / PROGRAMS[i.prog].hrs, h: i => `<div class="row" style="gap:6px;flex-wrap:nowrap">${bar(i.progHrs / PROGRAMS[i.prog].hrs * 100)}<span class="mono small">${Math.round(i.progHrs)}/${PROGRAMS[i.prog].hrs}h</span></div>` },
-    { l: 'Enrolled', v: i => i.progStart, h: i => 'Day ' + i.progStart }, { l: 'Certificates', v: i => i.certs.length, r: 1 }
-  ], { row: 'inmate', rowArg: i => i.id, empty: 'Nobody enrolled. Hire teachers, psychologists or rehabilitation specialists, and schedule Rehabilitation periods.', filters: [{ l: 'Program', opts: PROG_NAMES, fn: (i, v) => i.prog === v }] })}</div>`;
+    { l: 'Enrolled', v: i => i.progStart, h: i => 'Day ' + i.progStart }, { l: 'Why', v: i => i.progWhy || '', h: i => `<span class="small mut">${esc(i.progWhy || '')}</span>` }, { l: 'Certificates', v: i => i.certs.length, r: 1 }
+  ], { row: 'inmate', rowArg: i => i.id, empty: 'Nobody enrolled. Hire teachers, psychologists, psychiatrists or rehabilitation specialists, and schedule Rehabilitation periods.', filters: [{ l: 'Program', opts: PROG_NAMES, fn: (i, v) => i.prog === v }] })}</div>`;
+  if (wait.length) h += `<div class="card mt"><h3>Waitlists</h3>${tbl('wait', wait, [
+    { l: 'ID', v: i => i.id, h: i => `<span class="mono">${i.id}</span>` }, { l: 'Name', v: i => iname(i) }, { l: 'Class', v: i => i.cls, h: i => tag(i.cls) }, { l: 'Wants', v: i => i.progWant }, { l: 'Why', v: i => i.progWhy || '' },
+    { l: '', v: () => '', ns: 1, q: false, h: i => btn('Enroll now', 'enrollWant', i.id, 'sm') }
+  ], { row: 'inmate', rowArg: i => i.id, per: 10, filters: [{ l: 'Program', opts: PROG_NAMES, fn: (i, v) => i.progWant === v }] })}<p class="tiny dim mt6">Enrolling over capacity means some sessions will have more inmates than seats. Hire the staff shown in the table above to expand programs.</p></div>`;
   return h;
 };
+A.enrollWant = id => { const i = getInm(id); if (i && i.progWant) { setProg(i, i.progWant, `${i.progWhy} (placed by administration)`); dirty(); render(true); } };
 C.progCap = (v, el, p) => { S.progs[p].cap = clamp(parseInt(v) || 0, 0, 500); dirty(); };
 C.progOn = (v, el, p) => { S.progs[p].on = el.checked; if (!el.checked) S.inm.filter(i => i.prog === p).forEach(i => setProg(i, null)); dirty(); render(); };
 C.progElig = (v, el, arg) => { const [p, k] = arg.split('|'); const e = S.progs[p].elig; if (el.checked) { if (!e.includes(k)) e.push(k); } else S.progs[p].elig = e.filter(x => x !== k); dirty(); };
@@ -1942,6 +2103,12 @@ V.healthcare = () => {
     { l: 'ID', v: i => i.id, h: i => `<span class="mono">${i.id}</span>` }, { l: 'Name', v: i => iname(i) }, { l: 'Age', v: i => i.age, r: 1 }, { l: 'Class', v: i => i.cls, h: i => tag(i.cls) },
     { l: 'Health', v: i => Math.round(i.n.health), h: i => `<div class="row" style="gap:6px;flex-wrap:nowrap">${bar(i.n.health)}<span class="mono small">${Math.round(i.n.health)}</span></div>` }, { l: 'Condition', v: i => i.sick ? 'Illness / injury' : 'Poor health' }
   ], { row: 'inmate', rowArg: i => i.id, search: false, empty: 'The infirmary is empty.' })}</div>`;
+  const ci = S.inm.filter(i => i.psych != null);
+  if (ci.length || S.unlock.classes.includes('Insane')) h += `<div class="card mb"><h3>Psychiatric care</h3><p class="small mut">Criminally insane inmates lose psychiatric stability every day. Each Psychiatrist present does daily rounds for 15 patients (lowest stability first), and Psychiatric Treatment sessions add more. Unstable inmates (below 35) have far more incidents, especially psychotic episodes. Psychiatrists: <b>${staffCount('Psychiatrist')}</b> (${requirements()['Psychiatrist']} recommended).</p>${tbl('psy', ci, [
+    { l: 'ID', v: i => i.id, h: i => `<span class="mono">${i.id}</span>` }, { l: 'Name', v: i => iname(i) }, { l: 'Diagnosis', v: i => i.dx || '' },
+    { l: 'Stability', v: i => Math.round(i.psych), h: i => `<div class="row" style="gap:6px;flex-wrap:nowrap">${bar(i.psych)}<span class="mono small">${Math.round(i.psych)}</span></div>` },
+    { l: 'In treatment', v: i => i.prog === 'Psychiatric Treatment' ? 'Yes' : 'No' }, { l: 'Incidents', v: i => i.incCount, r: 1 }
+  ], { row: 'inmate', rowArg: i => i.id, sort: 3, per: 10, empty: 'No criminally insane inmates.' })}</div>`;
   const low = S.inm.filter(i => !i.infirm).sort((a, b) => a.n.health - b.n.health).slice(0, 15);
   h += `<div class="card"><h3>Lowest health (not admitted)</h3>${tbl('lowh', low, [
     { l: 'ID', v: i => i.id, h: i => `<span class="mono">${i.id}</span>` }, { l: 'Name', v: i => iname(i) }, { l: 'Age', v: i => i.age, r: 1 },
@@ -1970,7 +2137,8 @@ C.visitDay = (v, el, k) => { S.settings.visitDays[+k] = el.checked; dirty(); };
 V.parole = () => {
   const due = S.inm.filter(i => i.hearing);
   const soon = S.inm.filter(i => !i.hearing && i.parole - curDay() <= 14).sort((a, b) => a.parole - b.parole);
-  let h = `<h1>Parole</h1><p class="sub">Inmates become eligible for parole after serving a share of their sentence (${Object.entries(PAROLE_FRAC).map(([k, v]) => `${k} ${Math.round(v * 100)}%`).join(', ')}). The board weighs behavior, discipline, programs and employment. Approved inmates are released; others are reviewed again later.</p>`;
+  let h = `<h1>Parole & Appeals</h1><p class="sub">Inmates become eligible for parole after serving a share of their sentence (${Object.entries(PAROLE_FRAC).filter(([k, v]) => v).map(([k, v]) => `${CLS_LABEL[k]} ${Math.round(v * 100)}%`).join(', ')}). Criminally insane inmates also need psychiatric stability. Death row inmates are never paroled — they go through the appeals process instead. The board weighs behavior, discipline, programs and employment. Approved inmates are released; others are reviewed again later.</p>`;
+  h += deathRowCard();
   h += `<div class="grid g4 mb">${kpi('Hearings due', due.length)}${kpi('Eligible in 14 days', soon.length)}${kpi('Approved (total)', S.stats.paroleApproved)}${kpi('Denied (total)', S.stats.paroleDenied)}</div>`;
   h += `<div class="card mb"><div class="spread"><h3>Hearings due</h3><div class="row">${seg('paroleMode', S.settings.paroleMode, [['review', 'I review hearings'], ['auto', 'Board decides automatically']])}${due.length ? btn('Convene all', 'paroleAll', null, 'sm pri') : ''}</div></div>
     ${due.length ? `<div class="twrap"><table><thead><tr><th>Inmate</th><th>Class</th><th class="right">Served</th><th class="right">Behavior</th><th>Discipline</th><th class="right">Programs</th><th>Job</th><th class="right">Board score</th><th>Your recommendation</th><th></th></tr></thead><tbody>
@@ -1995,7 +2163,7 @@ V.finance = () => {
   const fb = fundingBreakdown(); const comp = fb.pop().comp;
   const y = S.hist[S.hist.length - 1]; const l30 = S.hist.slice(-30);
   const payroll = sum(S.staff, s => s.sal / 365);
-  const editable = S.mode === 'sandbox';
+  const editable = S.mode !== 'career';
   let h = `<h1>Finance</h1><p class="sub">Government operating funding is the main income, paid daily at midnight for each housed inmate by classification, adjusted by a compliance factor. Empty beds earn nothing but still cost utilities and maintenance.</p>`;
   h += `<div class="grid g4 mb">${kpi('Balance', fmt$(S.money), '', S.money < 0 ? 'bad' : '')}${kpi('Daily funding (est.)', fmt$(sum(fb, x => x.total)), `Monthly ≈ ${fmt$(sum(fb, x => x.total) * 30)}`)}
     ${kpi('Yesterday', y ? `${y.inc - y.exp >= 0 ? '+' : ''}${fmt$(y.inc - y.exp)}` : '—', y ? `In ${fmt$(y.inc)} · Out ${fmt$(y.exp)}` : 'Report at midnight', y && y.inc < y.exp ? 'bad' : 'good')}
@@ -2091,7 +2259,7 @@ V.administration = () => {
   const canInspect = curDay() - S.lastInspectDay >= 7;
   let h = `<h1>Administration</h1><p class="sub">Prison configuration, inspections, saving and game rules.</p>`;
   h += `<div class="grid g2 mb"><div class="card"><h3>Facility</h3><div class="kv"><div>Prison name</div><div>${esc(S.name)} ${btn('Rename', 'renamePrison', null, 'sm')}</div>
-    <div>Game mode</div><div>${S.mode === 'career' ? 'Career' : 'Sandbox'}</div><div>Population</div><div>${S.pop}</div><div>Initial size</div><div>${S.size}</div>
+    <div>Game mode</div><div>${modeLabel(S.mode)}</div><div>Population</div><div>${S.pop}</div><div>Initial size</div><div>${S.size}</div>
     <div>Day</div><div>${curDay()} (${DOW[dow()]}) ${clockStr()}</div><div>Classifications</div><div>${S.unlock.classes.join(', ')}</div><div>Tier 3 cells</div><div>${S.unlock.tier3 ? 'Available' : 'Locked'}</div></div></div>
     <div class="card"><h3>Government inspection</h3><p class="small mut">Current estimate: <b class="mono" style="color:var(--txt)">${est.score}/100</b>. Inspections happen every 30 days automatically; you can request one every 7 days.</p>
     ${Object.entries(est.parts).map(([k, v]) => `<div class="needrow" style="grid-template-columns:150px 1fr 60px"><span class="mut">${k}</span>${bar(v / est.max[k] * 100)}<span class="mono right">${v.toFixed(1)}/${est.max[k]}</span></div>`).join('')}
@@ -2113,6 +2281,103 @@ A.exportSave = () => {
 };
 A.copyExp = () => { const t = $('#exp'); t.select(); try { navigator.clipboard.writeText(t.value).then(() => toast('good', 'Copied.'), () => toast('info', 'Select the text and copy it manually.')); } catch (e) { toast('info', 'Select the text and copy it manually.'); } };
 A.importSave = () => { openModal(`<h2>Import save code</h2><p class="small mut">Paste a save code. It will be added as a new prison in your saves.</p><textarea id="imp" style="width:100%;height:160px;background:#0d1114;color:var(--txt);border:1px solid var(--line2);border-radius:6px;font:11px var(--mono)"></textarea><div class="row mt" style="justify-content:flex-end">${btn('Cancel', 'closeModal')}${btn('Import', 'importOk', null, 'pri')}</div>`); };
+
+/* ---------- Death row appeals ---------- */
+function deathRowCard() {
+  const dr = S.inm.filter(i => i.appeal);
+  if (!dr.length && !S.unlock.classes.includes('DeathRow')) return '';
+  let h = `<div class="card mb"><div class="spread"><h3>Death row appeals (${dr.length})</h3><span class="tiny dim">Executions carried out: ${S.stats.executions || 0}</span></div>`;
+  if (!dr.length) return h + '<div class="small mut">Nobody is on death row.</div></div>';
+  h += `<p class="small mut">Every death sentence goes through four stages: ${APPEAL_STAGES.join(' → ')}. Winning any stage commutes the sentence to life in Maximum security. If all four are denied, an execution date is set 14 days later (a court may still grant a last-minute stay). You can fund a legal team ($5,000 per stage) and, at the clemency stage, formally support clemency.</p>
+  <div class="twrap"><table><thead><tr><th>Inmate</th><th>Charges</th><th>Stage</th><th>Next date</th><th class="right">Odds</th><th class="right">Behavior</th><th>Psychiatric care</th><th></th></tr></thead><tbody>
+  ${dr.sort((a, b) => (a.appeal.exec || a.appeal.next) - (b.appeal.exec || b.appeal.next)).map(i => { const a = i.appeal; return `<tr><td>${inmLink(i.id, iname(i))} <span class="mono tiny dim">${i.id}</span></td><td class="small" style="white-space:normal">${esc(i.charges[0])}</td>
+    <td>${i.commuted ? '<span class="good">Commuted — awaiting Max bed</span>' : a.exec ? '<span class="bad">Appeals exhausted</span>' : `${a.stage + 1}/4 · ${APPEAL_STAGES[a.stage]}`}</td>
+    <td>${a.exec ? `<span class="bad">Execution Day ${a.exec}</span>` : 'Day ' + a.next}</td><td class="right mono">${a.exec || i.commuted ? '—' : Math.round(appealOdds(i) * 100) + '%'}</td><td class="right mono">${Math.round(i.beh)}</td>
+    <td class="small">${i.prog === 'Psychiatric Treatment' ? 'In treatment' : i.certs.includes('Psychiatric Treatment') ? 'Completed' : '<span class="mut">None</span>'}</td>
+    <td><div class="row" style="flex-wrap:nowrap">${!a.exec && !i.commuted ? btn(a.legal ? 'Legal team funded' : 'Fund legal team ($5k)', 'drLegal', i.id, 'sm', !!a.legal) : ''}${a.stage === 3 && !a.exec ? btn(a.support ? 'Supporting clemency' : 'Support clemency', 'drSupport', i.id, 'sm' + (a.support ? ' pri' : '')) : ''}</div></td></tr>`; }).join('')}
+  </tbody></table></div></div>`;
+  return h;
+}
+A.drLegal = id => { const i = getInm(id); if (!i || !i.appeal || i.appeal.legal) return; if (S.money < 5000) return toast('bad', 'Not enough funds.'); money(-5000, 'Legal & judicial', `Appeal legal team ${i.id}`); i.appeal.legal = 1; ihist(i, `Administration funded a legal team for the ${APPEAL_STAGES[i.appeal.stage].toLowerCase()}.`); dirty(); render(true); };
+A.drSupport = id => { const i = getInm(id); if (!i || !i.appeal) return; i.appeal.support = i.appeal.support ? 0 : 1; dirty(); render(true); };
+
+/* ---------- Discipline policy ---------- */
+V.discipline = () => {
+  const pol = S.settings.disc;
+  const since = d => S.inc.filter(x => curDay() - curDay(x.t) < d);
+  const l7 = since(7), l30 = since(30);
+  const durS = Object.keys(SANCTIONS).filter(k => SANCTIONS[k].dur);
+  let h = `<h1>Discipline</h1><p class="sub">Choose the punishment for each type of incident and how long it lasts. These rules are used whenever an incident is handled automatically, and are pre-selected when you decide an incident yourself on the Security page.</p>`;
+  h += `<div class="card mb"><div class="row mb">
+    <div><label class="f">Handle automatically</label>${seg('autoHandle', S.settings.autoHandle, [['minor', 'Minor only'], ['moderate', 'Minor + moderate'], ['all', 'All incidents']])}</div>
+    <div>${chk('escalate', S.settings.escalate, 'Double the duration for Major and Critical incidents')}</div></div>
+    <div class="twrap"><table><thead><tr><th>Incident type</th><th class="right">Last 7 days</th><th class="right">Last 30 days</th><th>Punishment</th><th class="right">Duration (days)</th><th>What it does</th></tr></thead><tbody>
+    ${INC_TYPES.map(t => { const p = pol[t] || { s: 'Verbal warning', days: 0 }; const X = SANCTIONS[p.s] || {}; return `<tr><td><b>${t}</b></td><td class="right mono">${l7.filter(x => x.type === t).length}</td><td class="right mono">${l30.filter(x => x.type === t).length}</td>
+      <td>${sel('discS', p.s, Object.keys(SANCTIONS), t)}</td><td class="right">${X.dur ? num('discD', p.days || X.days, t, 1, 60, 1, 64) : '<span class="dim">—</span>'}</td><td class="small mut" style="white-space:normal;min-width:200px">${X.d || ''}</td></tr>`; }).join('')}
+    </tbody></table></div>
+    <div class="row mt">${btn('Reset to recommended', 'discReset', null, 'sm')}<span class="tiny dim">Minor incidents are always logged; punishments with a duration (${durS.join(', ')}) apply for the days you set.</span></div></div>`;
+  const now = S.inm.filter(i => i.disc === 'Restricted' || i.disc === 'Solitary');
+  h += `<div class="card"><h3>Currently serving punishments (${now.length})</h3>${tbl('serving', now, [
+    { l: 'ID', v: i => i.id, h: i => `<span class="mono">${i.id}</span>` }, { l: 'Name', v: i => iname(i) }, { l: 'Class', v: i => i.cls, h: i => tag(i.cls) }, { l: 'Status', v: i => i.disc, h: i => `<span class="${i.disc === 'Solitary' ? 'bad' : 'warn'}">${i.disc}</span>` },
+    { l: 'Until', v: i => i.discUntil, h: i => 'Day ' + i.discUntil }, { l: 'Days left', v: i => i.discUntil - curDay(), r: 1 }, { l: '', v: () => '', ns: 1, q: false, h: i => btn('End early', 'discEnd', i.id, 'sm') }
+  ], { row: 'inmate', rowArg: i => i.id, per: 15, empty: 'Nobody is currently being punished.' })}</div>`;
+  return h;
+};
+C.discS = (v, el, t) => { const X = SANCTIONS[v]; S.settings.disc[t] = { s: v, days: X.dur ? (S.settings.disc[t] && S.settings.disc[t].days) || X.days : 0 }; dirty(); render(true); };
+C.discD = (v, el, t) => { S.settings.disc[t].days = clamp(parseInt(v) || 1, 1, 60); dirty(); };
+C.escalate = (v, el) => { S.settings.escalate = el.checked; dirty(); };
+A.discReset = () => { S.settings.disc = defaultDiscipline(); dirty(); render(true); };
+A.discEnd = id => { const i = getInm(id); if (!i) return; ihist(i, `${i.disc} ended early by administration.`); i.disc = 'Warning'; i.discUntil = curDay(); dirty(); render(true); };
+
+/* ---------- Test mode ---------- */
+V.testing = () => {
+  if (!S.test) return `<h1>Test Mode</h1><div class="card">${btn('Enable test tools for this prison', 'testOn', null, 'pri')}</div>`;
+  const T = UI.t = UI.t || { cls: 'Medium', n: 10, inc: 'Fight', weather: 'Clear' };
+  const box = (title, body) => `<div class="card"><h3>${title}</h3>${body}</div>`;
+  let h = `<h1>Test Mode</h1><p class="sub">Tools for trying things out quickly. Nothing here is a normal game action. A 100x speed button is available in the top bar.</p><div class="grid g3 mb">`;
+  h += box('Money', `<div class="row">${btn('+$100k', 'tMoney', 100000, 'sm')}${btn('+$1M', 'tMoney', 1000000, 'sm')}${btn('Set to $0', 'tMoneySet', 0, 'sm')}${btn('Set to -$50k', 'tMoneySet', -50000, 'sm')}</div>`);
+  h += box('Time', `<div class="row">${btn('+1 hour', 'tTime', 60, 'sm')}${btn('+1 day', 'tTime', 1440, 'sm')}${btn('+7 days', 'tTime', 10080, 'sm')}${btn('+30 days', 'tTime', 43200, 'sm')}</div><p class="tiny dim mt6">Runs the full simulation for that period instantly.</p>`);
+  h += box('Spawn inmates', `<div class="row">${sel('tCls', T.cls, CLASSES.map(c => [c, CLS_LABEL[c]]))}${num('tN', T.n, '', 1, 200, 1, 64)}${btn('Admit now', 'tSpawn', null, 'sm pri')}</div><p class="tiny dim mt6">Bypasses intake limits; goes to the queue if no beds.</p>`);
+  h += box('Trigger incident', `<div class="row">${sel('tInc', T.inc, INC_TYPES.concat(['Escape', 'Positive behavior']))}${btn('Trigger', 'tIncident', null, 'sm pri')}</div><p class="tiny dim mt6">Uses a random inmate (of the class selected under Spawn, if any are housed).</p>`);
+  h += box('Death row', `<div class="row">${btn('All appeals due today', 'tAppeals', null, 'sm')}${btn('Exhaust appeals for one', 'tExhaust', null, 'sm')}${btn('Add death row inmate', 'tSpawnDR', null, 'sm')}</div>`);
+  h += box('Criminally insane', `<div class="row">${btn('Psychiatric crisis (all → 10)', 'tPsych', 10, 'sm')}${btn('Stabilize all (→ 90)', 'tPsych', 90, 'sm')}</div>`);
+  h += box('Needs', `<div class="row">${btn('All needs perfect', 'tNeeds', 100, 'sm')}${btn('All needs terrible', 'tNeeds', 15, 'sm')}${btn('Heal everyone', 'tHeal', null, 'sm')}</div>`);
+  h += box('Staff', `<div class="row">${btn('Hire to meet needs (free)', 'tHire', null, 'sm')}${btn('Everyone present', 'tPresent', 1, 'sm')}${btn('Half of officers absent', 'tPresent', 0, 'sm')}</div>`);
+  h += box('World', `<div class="row">${sel('tWeather', S.weather, WEATHER.map(w => w[0]))}${btn('PC request', 'tPC', null, 'sm')}${btn('Run inspection', 'tInspect', null, 'sm')}${btn('Unlock everything', 'tUnlock', null, 'sm')}${S.mode === 'career' ? btn('Complete next objective', 'tObjective', null, 'sm') : ''}</div>`);
+  h += `</div><div class="card"><h3>Debug</h3><div class="kv small"><div>Save size</div><div class="mono">${fmtN(JSON.stringify(S).length / 1024)} KB</div><div>Inmates / queue / released</div><div class="mono">${S.inm.length} / ${S.queue.length} / ${S.released.length}</div><div>Incidents stored</div><div class="mono">${S.inc.length}</div><div>Game time (minutes)</div><div class="mono">${S.t}</div><div>Storage</div><div>${Store.mode}</div></div>
+    <div class="row mt">${btn('Disable test tools', 'testOff', null, 'sm')}</div></div>`;
+  return h;
+};
+A.testOn = () => { S.test = true; dirty(); renderShell(); render(); };
+A.testOff = () => { S.test = false; if (S.speed > 30) S.speed = 30; UI.view = 'dashboard'; dirty(); renderShell(); render(); };
+A.tMoney = v => { money(+v, 'Test', 'Test mode deposit'); dirty(); updateHeader(); render(true); };
+A.tMoneySet = v => { S.money = +v; dirty(); updateHeader(); render(true); };
+A.tTime = m => { const t0 = performance.now(); advanceMinutes(+m); dirty(); updateHeader(); render(true); toast('info', `Advanced ${+m >= 1440 ? (+m / 1440) + ' day(s)' : '1 hour'} in ${Math.round(performance.now() - t0)} ms.`); };
+C.tCls = v => { UI.t.cls = v; }; C.tN = v => { UI.t.n = clamp(parseInt(v) || 1, 1, 200); }; C.tInc = v => { UI.t.inc = v; };
+C.tWeather = v => { S.weather = v; dirty(); toast('info', `Weather set to ${v}.`); };
+A.tSpawn = () => { const { cls, n } = UI.t; let a = 0, q = 0; for (let k = 0; k < n; k++) { const i = genInmate(cls); const spot = findBed(cls); if (spot) { place(i, spot.b, spot.c); i.loc = 'Cell'; S.inm.push(i); afterAdmit(i); a++; } else { i.queued = curDay(); i.loc = 'Pending intake'; S.queue.push(i); q++; } } toast('good', `${a} admitted, ${q} queued.`); dirty(); updateHeader(); render(true); };
+A.tSpawnDR = () => { UI.t.cls = 'DeathRow'; UI.t.n = 1; A.tSpawn(); };
+A.tIncident = () => {
+  const pool = S.inm.filter(i => i.cls === UI.t.cls).length ? S.inm.filter(i => i.cls === UI.t.cls) : S.inm; if (!pool.length) return toast('bad', 'No inmates.');
+  const i = pick(pool); const b = getBlock(i.blk); const t = UI.t.inc;
+  if (t === 'Escape') escape(i, b);
+  else if (t === 'Positive behavior') incident(i, 'Positive behavior', `${iname(i)} recognised for good conduct (test).`, 'Positive', b, true);
+  else if (t === 'Medical emergency') { i.n.health = 30; i.infirm = true; incident(i, t, `${iname(i)} required emergency medical attention (test).`, 'Major', b); }
+  else if (t === 'Assault on protective custody') { const v = S.inm.find(x => x.cls === 'Protective'); const a = S.inm.find(x => x.cls !== 'Protective'); if (!v || !a) return toast('bad', 'Needs a PC inmate and a general population inmate.'); yardClash([v], [a]); }
+  else makeIncident(i, b, t, 1);
+  toast('info', `Triggered ${t} involving ${iname(i)}.`); dirty(); render(true);
+};
+A.tAppeals = () => { S.inm.filter(i => i.appeal && !i.appeal.exec).forEach(i => i.appeal.next = curDay()); toast('info', 'Appeals will be heard at midnight (or use +1 day).'); dirty(); };
+A.tExhaust = () => { const i = S.inm.find(x => x.appeal && !x.appeal.exec); if (!i) return toast('bad', 'No death row inmate with appeals pending.'); i.appeal.stage = 3; i.appeal.next = curDay(); i.appeal.support = 0; toast('info', `${iname(i)} is at the clemency stage; decided at midnight.`); dirty(); render(true); };
+A.tPsych = v => { S.inm.forEach(i => { if (i.psych != null) i.psych = +v; }); dirty(); render(true); };
+A.tNeeds = v => { S.inm.forEach(i => { for (const k in i.n) i.n[k] = k === 'stress' ? 100 - v : +v; }); dirty(); render(true); };
+A.tHeal = () => { S.inm.forEach(i => { i.n.health = 100; i.infirm = false; i.sick = false; }); dirty(); render(true); };
+A.tHire = () => { const req = requirements(); let n = 0; for (const r of ROLE_NAMES) { const gap = (req[r] || 0) - staffCount(r); for (let k = 0; k < gap; k++) { const s = genStaff(r, ri(2, 8)); S.staff.push(s); if (r === 'Correctional Officer') assignNewOfficer(s); n++; } } toast('good', `Hired ${n} staff for free.`); dirty(); updateHeader(); render(true); };
+A.tPresent = v => { S.staff.forEach(s => { s.present = +v ? true : (s.role === 'Correctional Officer' ? rnd() < .5 : true); }); dirty(); updateHeader(); render(true); };
+A.tPC = () => { const i = S.inm.find(x => !['Protective', 'DeathRow', 'Insane'].includes(x.cls) && !x.pcRequest); if (!i) return; i.pcRequest = { d: curDay(), why: 'Labelled an informant by other inmates' }; note('warn', `${iname(i)} (${i.id}) has requested protective custody (test).`); dirty(); toast('info', 'PC request created — see Security.'); };
+A.tInspect = () => { runInspection(false); dirty(); render(true); };
+A.tUnlock = () => { CLASSES.forEach(unlockClass); S.unlock.tier3 = true; S.unlock.bonus = true; PROG_NAMES.forEach(p => S.unlock.progs[p] = true); JOB_NAMES.forEach(j => S.unlock.jobs[j] = true); dirty(); render(true); };
+A.tObjective = () => { if (S.career.idx >= CAREER.length) return; const o = CAREER[S.career.idx]; S.career.done.push(o.id); S.career.idx++; o.give(); note('good', `Objective completed (test): ${o.t}.`); dirty(); render(true); };
 /* ================= Persistence ================= */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const timeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
@@ -2227,7 +2492,7 @@ function showLockBanner() {
 A.lockRetry = async () => { const ok = await Lock.take(S.id); if (ok) { document.getElementById('lockBanner')?.remove(); toast('good', 'Control resumed in this window.'); try { const fresh = await Store.load(S.id); S = fresh; renderShell(); render(); } catch (e) { } } else toast('warn', 'Still open elsewhere. Try again shortly.'); };
 
 /* ================= Game loop ================= */
-const SPEEDS = [0, 1, 2, 4, 10, 30];
+const SPEEDS = [0, 1, 2, 4, 10, 30, 100];
 let lastTick = performance.now(), acc = 0, prevSpeed = 1, hiddenPaused = false;
 function setSpeed(v) { if (!S) return; if (Lock.lost && v > 0) return; if (v === 0 && S.speed > 0) { prevSpeed = S.speed; Store.save(S); } S.speed = v; updateHeader(); }
 setInterval(() => {
@@ -2259,7 +2524,7 @@ function renderShell() {
   $('#hdr').innerHTML = `<button class="hbtn" id="menuBtn" data-a="toggleNav">☰</button>
     <div class="brand"><div class="logo">PM</div><span class="pname">${esc(S.name)}</span></div>
     <div class="clock" id="clk"></div>
-    <div class="speeds" id="spd">${SPEEDS.map(v => `<button data-a="speed" data-arg="${v}">${v ? v + 'x' : '❚❚'}</button>`).join('')}</div>
+    <div class="speeds" id="spd">${SPEEDS.filter(v => v < 100 || S.test).map(v => `<button data-a="speed" data-arg="${v}">${v ? v + 'x' : '❚❚'}</button>`).join('')}</div>
     <div class="hstat hide-m"><span>Balance</span><b id="hBal"></b></div>
     <div class="hstat hide-m"><span>Pop</span><b id="hPop"></b></div>
     <div class="hstat" title="Employees present today / total employed"><span>Staff</span><b id="hStaff"></b></div>
@@ -2271,7 +2536,7 @@ function renderShell() {
 }
 function renderNav() {
   const open = S.inc.filter(x => x.status === 'Open').length, due = S.inm.filter(i => i.hearing).length;
-  $('#nav').innerHTML = NAV.map(([k, l], n) => `<a class="${UI.view === k ? 'on' : ''}" data-a="nav" data-arg="${k}"><span class="n">${String(n + 1).padStart(2, '0')}</span>${l}${k === 'security' && open ? `<span class="cnt">${open}</span>` : ''}${k === 'parole' && due ? `<span class="cnt" style="background:var(--info)">${due}</span>` : ''}${k === 'intake' && S.queue.length ? `<span class="cnt" style="background:var(--warn);color:#111">${S.queue.length}</span>` : ''}</a>`).join('');
+  $('#nav').innerHTML = NAV.filter(([k]) => k !== 'testing' || S.test).map(([k, l], n) => `<a class="${UI.view === k ? 'on' : ''}" data-a="nav" data-arg="${k}"><span class="n">${String(n + 1).padStart(2, '0')}</span>${l}${k === 'security' && open ? `<span class="cnt">${open}</span>` : ''}${k === 'parole' && due ? `<span class="cnt" style="background:var(--info)">${due}</span>` : ''}${k === 'intake' && S.queue.length ? `<span class="cnt" style="background:var(--warn);color:#111">${S.queue.length}</span>` : ''}</a>`).join('');
 }
 function updateHeader() {
   if (!S || !$('#clk')) return;
@@ -2311,7 +2576,7 @@ document.addEventListener('keydown', e => {
   if (e.target.closest && e.target.closest('input,select,textarea')) return;
   if (!S || $('#app').classList.contains('hide')) return;
   if (e.key === ' ') { e.preventDefault(); setSpeed(S.speed ? 0 : prevSpeed || 1); }
-  if (e.key >= '1' && e.key <= '5') setSpeed(SPEEDS[+e.key]);
+  if (e.key >= '1' && e.key <= (S.test ? '6' : '5')) setSpeed(SPEEDS[+e.key]);
   if (e.key === 'Escape' && UI.modal) closeModal();
 });
 $('#modalBg').addEventListener('click', e => { if (e.target.id === 'modalBg') closeModal(); });
@@ -2354,15 +2619,15 @@ function renderMenu() {
   h += `<div class="card mb"><div class="spread"><h2>Your prisons</h2><span class="tiny dim">${Store.mode === 'cloud' ? 'Saved to your Claude account' : Store.mode === 'local' ? 'Saved in this browser' : ''}</span></div>`;
   if (SLOTS == null) h += '<div class="mut small">Loading saves…</div>';
   else if (!SLOTS.length) h += '<div class="mut small">No prisons yet. Create your first one below.</div>';
-  else h += SLOTS.map(s => `<div class="slot"><div><b>${esc(s.name)}</b><div class="small mut">${s.mode === 'career' ? 'Career' : 'Sandbox'} · Day ${s.day} · ${s.pop}/${s.cap || '?'} inmates · ${fmt$(s.money)} · saved ${new Date(s.updated).toLocaleString()}</div></div><div class="row">${btn('Continue', 'loadSlot', s.slot, 'pri')}${btn('Delete', 'delSlot', s.slot, 'danger sm')}</div></div>`).join('');
+  else h += SLOTS.map(s => `<div class="slot"><div><b>${esc(s.name)}</b><div class="small mut">${modeLabel(s.mode)} · Day ${s.day} · ${s.pop}/${s.cap || '?'} inmates · ${fmt$(s.money)} · saved ${new Date(s.updated).toLocaleString()}</div></div><div class="row">${btn('Continue', 'loadSlot', s.slot, 'pri')}${btn('Delete', 'delSlot', s.slot, 'danger sm')}</div></div>`).join('');
   h += `<div class="row mt">${btn('Import save code', 'importSave', null, 'sm')}</div></div>`;
   h += `<div class="card"><h2>New prison</h2>
     <div class="field"><label class="f">Prison name</label><input type="text" data-c="ngName" value="${esc(g.name)}" style="width:100%" maxlength="40"></div>
-    <div class="field"><label class="f">Game mode</label><div class="choice" style="grid-template-columns:1fr 1fr">${cbtn('mode', 'sandbox', 'Sandbox', 'Full freedom: choose size, funds and classifications. Everything unlocked.')}${cbtn('mode', 'career', 'Career', 'Start with a small Minimum/Medium prison and unlock facilities through objectives.')}</div></div>
+    <div class="field"><label class="f">Game mode</label><div class="choice">${cbtn('mode', 'sandbox', 'Sandbox', 'Full freedom: choose size, funds and classifications. Everything unlocked.')}${cbtn('mode', 'career', 'Career', 'Start with a small Minimum/Medium prison and unlock facilities through objectives.')}${cbtn('mode', 'test', 'Test mode', 'Sandbox plus test tools: spawn inmates, trigger incidents, skip time, 100x speed.')}</div></div>
     ${career ? '<div class="alert info">Career starts as a Small prison (50 beds, Minimum + Medium) with $150,000.</div>' : `
     <div class="field"><label class="f">Prison size</label><div class="choice">${cbtn('size', 'Small', 'Small', '50 beds')}${cbtn('size', 'Medium', 'Medium', '150 beds')}${cbtn('size', 'Large', 'Large', '300 beds')}</div></div>
     <div class="field"><label class="f">Security classifications</label>${CLASSES.map(c => `<label class="chk"><input type="checkbox" data-c="ngCls" data-arg="${c}"${g.classes.includes(c) ? ' checked' : ''}> ${CLS_LABEL[c]}</label>`).join('')}</div>
-    <div class="field"><label class="f">Starting funds</label>${seg('ng_funds', g.funds, [['250000', '$250k'], ['500000', '$500k'], ['1000000', '$1M'], ['5000000', '$5M']])}</div>`}
+    <div class="field"><label class="f">Starting funds</label>${g.mode === 'test' ? '<span class="small mut">$10,000,000 in test mode</span>' : ''}${g.mode === 'test' ? '' : seg('ng_funds', g.funds, [['250000', '$250k'], ['500000', '$500k'], ['1000000', '$1M'], ['5000000', '$5M']])}</div>`}
     <div class="grid g3"><div class="field"><label class="f">Population</label>${seg('ng_pop', g.pop, [['Male', 'Male'], ['Female', 'Female']])}</div>
     <div class="field"><label class="f">Starting employees</label>${seg('ng_staff', g.staff, [['recommended', 'Recommended'], ['minimal', 'Minimal'], ['none', 'None']])}</div>
     <div class="field"><label class="f">Daily intake</label>${seg('ng_intake', g.intake, [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']])}</div></div>
@@ -2377,9 +2642,9 @@ A.startGame = async () => {
   const g = UI.ng; const career = g.mode === 'career';
   const size = career ? 'Small' : g.size;
   const mult = { low: .6, normal: 1, high: 1.6 }[g.intake];
-  const base = { Small: { Minimum: 3, Medium: 4, Maximum: 2, Supermax: 1, Protective: 1 }, Medium: { Minimum: 3, Medium: 5, Maximum: 2, Supermax: 1, Protective: 1 }, Large: { Minimum: 6, Medium: 8, Maximum: 4, Supermax: 2, Protective: 1 } }[size];
-  const intake = {}; CLASSES.forEach(c => intake[c] = Math.max(c === 'Supermax' || c === 'Protective' ? 0 : 1, Math.round(base[c] * mult)));
-  const cfg = { name: (g.name || 'New Prison').trim().slice(0, 40), mode: g.mode, size, pop: g.pop, funds: career ? 150000 : +g.funds, staff: g.staff, classes: career ? null : CLASSES.filter(c => g.classes.includes(c)), intake, overflow: g.overflow };
+  const base = { Small: { Minimum: 3, Medium: 4, Maximum: 2, Supermax: 1, Protective: 1, DeathRow: .1, Insane: .3 }, Medium: { Minimum: 3, Medium: 5, Maximum: 2, Supermax: 1, Protective: 1, DeathRow: .2, Insane: .5 }, Large: { Minimum: 6, Medium: 8, Maximum: 4, Supermax: 2, Protective: 1, DeathRow: .3, Insane: .8 } }[size];
+  const intake = {}; CLASSES.forEach(c => intake[c] = base[c] < 1 ? Math.round(base[c] * mult * 10) / 10 : Math.max(c === 'Supermax' || c === 'Protective' ? 0 : 1, Math.round(base[c] * mult)));
+  const cfg = { name: (g.name || 'New Prison').trim().slice(0, 40), mode: g.mode, size, pop: g.pop, funds: career ? 150000 : g.mode === 'test' ? 10000000 : +g.funds, staff: g.staff, classes: career ? null : CLASSES.filter(c => g.classes.includes(c)), intake, overflow: g.overflow };
   newState(cfg);
   UI.view = 'dashboard'; UI.build = null; for (const k in TS) delete TS[k];
   await Store.save(S);
@@ -2404,7 +2669,10 @@ function migrate(st) {
   ['intake', 'funding'].forEach(k => { if (st.settings[k].Protective == null) st.settings[k].Protective = k === 'intake' ? 0 : DEFAULT_FUNDING.Protective; });
   if (st.yards == null) { st.yards = Math.max(1, Math.ceil(sum(st.blocks, b => sum(b.cells, c => c.beds)) / 150)); CLASSES.forEach(c => { const s = st.sched[c]; const k = s.indexOf('Recreation'); if (k >= 0 && !s.includes('Yard')) s[k] = 'Yard'; }); }
   if (!st.weather) st.weather = 'Clear';
-  if (st.mode !== 'career' && !st.unlock.classes.includes('Protective')) st.unlock.classes.push('Protective');
+  if (st.mode !== 'career') CLASSES.forEach(c => { if (!st.unlock.classes.includes(c)) st.unlock.classes.push(c); });
+  CLASSES.forEach(c => { if (!st.sched[c]) st.sched[c] = defaultSchedule(c); if (st.settings.intake[c] == null) st.settings.intake[c] = 0; if (st.settings.funding[c] == null) st.settings.funding[c] = DEFAULT_FUNDING[c]; });
+  PROG_NAMES.forEach(p => { if (!st.progs[p]) st.progs[p] = { on: true, cap: 30, elig: PROGRAMS[p].elig.slice(), completions: 0 }; if (st.unlock.progs[p] == null) st.unlock.progs[p] = true; });
+  if (!st.settings.disc) st.settings.disc = defaultDiscipline(); if (st.settings.escalate == null) st.settings.escalate = true; if (!st.settings.progChoice) st.settings.progChoice = 'inmate';
 }
 
 /* ================= Boot ================= */

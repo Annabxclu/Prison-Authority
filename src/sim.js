@@ -53,6 +53,7 @@ function requirements() {
     'Teacher': Math.ceil(enrolledFor('Teacher') / 15),
     'Psychologist': Math.ceil(enrolledFor('Psychologist') / 11),
     'Rehabilitation Specialist': Math.ceil(enrolledFor('Rehabilitation Specialist') / 13),
+    'Psychiatrist': Math.ceil(S.inm.filter(i => i.cls === 'Insane' || i.cls === 'DeathRow').length / 15),
     'Warden': pop >= 80 ? 1 : 0
   };
 }
@@ -96,7 +97,7 @@ function processIntake() {
   if (!S.settings.intakeOn) return intakeSummary();
   for (const cls of CLASSES) {
     if (!S.unlock.classes.includes(cls)) continue;
-    const n = S.settings.intake[cls] | 0;
+    const v = +S.settings.intake[cls] || 0; const n = Math.floor(v) + (rnd() < v % 1 ? 1 : 0);
     for (let k = 0; k < n; k++) {
       const i = genInmate(cls);
       T.recv[cls] = (T.recv[cls] || 0) + 1;
@@ -148,9 +149,39 @@ function setJob(i, j) {
 }
 function progEnrolled(p) { return S.inm.filter(i => i.prog === p).length; }
 function progSeats(p) { return staffCount(PROGRAMS[p].role, true) * PROGRAMS[p].per; }
-function progEligible(i, p) { const c = S.progs[p]; return S.unlock.progs[p] && c.on && c.elig.includes(i.cls) && !i.certs.includes(p); }
+function progEligible(i, p) { const c = S.progs[p]; return S.unlock.progs[p] && c.on && c.elig.includes(i.cls) && (PROGRAMS[p].repeat || !i.certs.includes(p)); }
+function progRoom(p) { return progEnrolled(p) < Math.min(S.progs[p].cap, progSeats(p) || staffCount(PROGRAMS[p].role) * PROGRAMS[p].per); }
+/* Inmates choose programs based on their own personality, needs and history */
+function programWishes(i) {
+  const w = [];
+  const add = (p, score, why) => { if (progEligible(i, p) && staffCount(PROGRAMS[p].role) > 0) w.push({ p, score: score + rnd() * 2, why }); };
+  const t = x => i.traits.includes(x);
+  add('Anger Management', t('Aggressive') ? 6 : i.incCount > 2 ? 3 : 0, t('Aggressive') ? 'wants to control their temper' : 'wants to stay out of trouble');
+  add('Substance Recovery', i.charges.some(c => /Drug|alcohol|narcotic/i.test(c)) ? 6 : 0.5, i.charges.some(c => /Drug/i.test(c)) ? 'wants to beat an addiction' : 'curious about recovery support');
+  add('Vocational Training', t('Hardworking') ? 5 : i.age < 35 ? 2.5 : 1, t('Hardworking') ? 'wants to learn a trade' : 'wants job skills for release');
+  add('Education', t('Introverted') ? 4 : i.age < 26 ? 3.5 : 1.5, i.age < 26 ? 'wants to finish school' : 'enjoys studying');
+  add('Counseling', (t('Anxious') ? 4 : 0) + (i.n.stress > 60 ? 3 : 0), i.n.stress > 60 ? 'is struggling with stress' : 'wants someone to talk to');
+  add('Life Skills', t('Leadership-oriented') ? 3.5 : remaining(i) < 40 ? 4 : 1.5, remaining(i) < 40 ? 'is preparing for release' : 'wants practical skills');
+  add('Psychiatric Treatment', i.cls === 'Insane' ? 7 + (60 - (i.psych || 60)) / 10 : i.cls === 'DeathRow' ? 5 : 0, i.cls === 'Insane' ? 'was referred for ongoing psychiatric care' : 'wants support while facing a death sentence');
+  if (t('Manipulative')) w.forEach(x => { x.score += PROGRAMS[x.p].fx.parole / 4; x.why = 'thinks it will impress the parole board'; });
+  return w.sort((a, b) => b.score - a.score);
+}
+function inmateChooses(i) {
+  if (i.prog) return false;
+  const t = x => i.traits.includes(x);
+  if (t('Rebellious') && rnd() < .5) return false; // refuses this time
+  if (i.disc === 'Solitary') return false;
+  const w = programWishes(i); if (!w.length) return false;
+  const top = w[0];
+  if (progRoom(top.p)) { setProg(i, top.p, `chose it — ${top.why}`); i.progWant = null; return true; }
+  // Top choice full: cooperative/easily influenced inmates settle for second choice, others join the waitlist
+  if ((t('Cooperative') || t('Easily influenced')) && w[1] && progRoom(w[1].p)) { setProg(i, w[1].p, `${top.p} was full, settled for this — ${w[1].why}`); i.progWant = null; return true; }
+  if (i.progWant !== top.p) { i.progWant = top.p; i.progWhy = top.why; ihist(i, `Applied for ${top.p} (${top.why}); placed on the waitlist.`); }
+  return false;
+}
 function tryEnroll(i) {
   if (i.prog) return false;
+  if (S.settings.progChoice !== 'admin') return inmateChooses(i);
   let opts = PROG_NAMES.filter(p => progEligible(i, p) && progEnrolled(p) < Math.min(S.progs[p].cap, progSeats(p) || staffCount(PROGRAMS[p].role) * PROGRAMS[p].per));
   if (!opts.length) return false;
   // Targeted: aggressive → anger mgmt; drug charges → recovery
@@ -158,15 +189,15 @@ function tryEnroll(i) {
   opts.sort((a, b) => pref(a) - pref(b));
   setProg(i, opts[0]); return true;
 }
-function setProg(i, p) {
+function setProg(i, p, why) {
   if (i.prog) { i.progHist.unshift({ p: i.prog, start: i.progStart, end: curDay(), hrs: Math.round(i.progHrs), done: false }); ihist(i, `Withdrew from ${i.prog}.`); }
-  i.prog = p || null; i.progHrs = 0; i.progStart = curDay();
-  if (p) ihist(i, `Enrolled in ${p}.`);
+  i.prog = p || null; i.progHrs = 0; i.progStart = curDay(); i.progWhy = p ? (why || 'assigned by administration') : null;
+  if (p) { i.progWant = null; ihist(i, `Enrolled in ${p} (${i.progWhy}).`); }
 }
 function completeProg(i) {
   const p = i.prog, P = PROGRAMS[p];
   i.progHist.unshift({ p, start: i.progStart, end: curDay(), hrs: P.hrs, done: true }); if (i.progHist.length > 10) i.progHist.length = 10;
-  i.certs.push(p); i.beh = clamp(i.beh + P.fx.beh); i.paroleRec += P.fx.parole;
+  if (!i.certs.includes(p)) i.certs.push(p); i.beh = clamp(i.beh + P.fx.beh); i.paroleRec += P.fx.parole;
   if (P.fx.calm && i.traits.includes('Aggressive')) { i.traits[i.traits.indexOf('Aggressive')] = 'Calm'; ihist(i, 'Personality shift: Aggressive → Calm.'); }
   if (P.fx.stress) i.n.stress = clamp(i.n.stress - 20);
   ihist(i, `Completed ${p}. Earned: ${P.cert}.`);
@@ -287,7 +318,7 @@ function hourTick(h) {
         { const w = S.jobs[i.job].wage; wages += w; i.earn += w; i.bal += w; if (i.job === 'Workshop') workshopHrs++; if (rnd() < .01) i.beh = clamp(i.beh + 1); }
         break;
       case 'Rehab':
-        if (seats[i.prog] > 0) { seats[i.prog]--; i.progHrs++; n.stress -= 3; if (i.progHrs >= PROGRAMS[i.prog].hrs) completeProg(i); }
+        if (seats[i.prog] > 0) { seats[i.prog]--; i.progHrs++; n.stress -= 3; if (i.prog === 'Psychiatric Treatment') { n.stress -= 3; if (i.psych != null) i.psych = clamp(i.psych + 1); } if (i.progHrs >= PROGRAMS[i.prog].hrs) completeProg(i); }
         else { hourFlags.progShort = hourFlags.progShort || {}; hourFlags.progShort[i.prog] = true; }
         break;
       case 'Visits':
@@ -362,7 +393,10 @@ function rollIncident(i, b, cov, act, rivalsHere) {
   p *= { Yard: 1.6, Recreation: 1.4, Free: 1.4, Meal: 1.25, Work: .8, Rehab: .6, Lockdown: .5, Solitary: .15, Visits: 1.1, Shower: 1.1, Idle: 1.2, Wake: .8 }[act] || 1;
   p *= 1 + rivalsHere * .3 + b.contraband / 120;
   if (i.disc === 'Solitary') p *= .3;
+  if (i.cls === 'Insane') p *= 1 + Math.max(0, 55 - (i.psych || 50)) / 10;
+  if (i.cls === 'DeathRow' && i.appeal && i.appeal.exec) p *= 1.8;
   if (rnd() < p) {
+    if (i.cls === 'Insane') { makeIncident(i, b, wpick([['Psychotic episode', 35 + Math.max(0, 50 - (i.psych || 50))], ['Fight', 18], ['Assault on staff', 14], ['Property damage', 15], ['Argument', 15], ['Refusal to follow instructions', 10]]), cov); return; }
     if (i.cls === 'Protective') { makeIncident(i, b, wpick([['Argument', 40], ['Refusal to follow instructions', 30], ['Property damage', 10], ['Contraband', 10]]), cov); return; }
     const type = wpick([
       ['Argument', 30], ['Refusal to follow instructions', 20 * (i.traits.includes('Rebellious') ? 2 : 1)],
@@ -404,6 +438,7 @@ function makeIncident(i, b, type, cov) {
     }
     case 'Property damage': { sev = 'Moderate'; const cost = ri(150, 1800) * (staffCount('Maintenance Worker') ? 1 : 1.5); money(-cost, 'Maintenance', `Repairs: ${b.name}`); desc = `${iname(i)} damaged ${pick(['cell fixtures', 'a door lock', 'the TV room', 'kitchen equipment', 'a window', 'plumbing'])}. Repair cost ${fmt$(cost)}.`; break; }
     case 'Contraband': sev = rnd() < .3 ? 'Major' : 'Moderate'; desc = `Contraband found on ${iname(i)}: ${pick(['mobile phone', 'homemade weapon', 'narcotics', 'tobacco', 'homemade alcohol', 'unauthorised medication'])}.`; b.contraband = clamp(b.contraband - 5); S.today.contraband++; break;
+    case 'Psychotic episode': sev = (i.psych || 50) < 25 ? 'Major' : 'Moderate'; desc = `${iname(i)} suffered a psychotic episode (${pick(['paranoid delusions', 'severe agitation', 'auditory hallucinations', 'barricaded in cell', 'self-neglect and confusion', 'violent outburst'])}).`; i.psych = clamp((i.psych || 50) - 8); mates.forEach(m => m.n.safety = clamp(m.n.safety - 3)); break;
     case 'Assault on staff': sev = 'Major'; desc = `${iname(i)} assaulted a correctional officer.`; { const o = pick(S.staff.filter(s => s.role === 'Correctional Officer' && s.assign === b.id)); if (o) { o.morale = clamp(o.morale - 15); desc = `${iname(i)} assaulted Officer ${o.ln}.`; } } break;
     case 'Attempted escape': {
       sev = 'Critical';
@@ -449,24 +484,40 @@ function escape(i, b) {
 }
 const SANCTIONS = {
   'Verbal warning': { beh: -2, d: 'Formal warning recorded' },
-  'Loss of privileges': { beh: -5, days: 3, disc: 'Restricted', d: 'No recreation, free time or visits for 3 days' },
-  'Solitary confinement': { beh: -8, days: 5, disc: 'Solitary', stress: 15, d: '5 days in segregation' },
+  'Fine': { beh: -2, fine: 25, d: 'Deduct $25 from the inmate account' },
+  'Restitution': { beh: -3, fine: 60, d: 'Inmate pays up to $60 toward damages' },
+  'Loss of job': { beh: -4, job: true, d: 'Removed from work assignment' },
+  'Loss of privileges': { beh: -5, days: 3, dur: true, disc: 'Restricted', d: 'No yard, recreation, free time or visits' },
+  'Solitary confinement': { beh: -8, days: 5, dur: true, disc: 'Solitary', stress: 15, d: 'Held in segregation' },
+  'Psychiatric observation': { beh: 0, days: 2, dur: true, disc: 'Restricted', psych: 18, cost: 200, d: 'Observation and medication review (helps unstable inmates)' },
   'Investigation': { cost: 300, d: 'Officers investigate: may uncover contraband and gang activity' },
   'Medical evaluation': { cost: 250, d: 'Send to infirmary for assessment' },
   'Refer for prosecution': { beh: -12, sent: [20, 90], d: 'Adds 20–90 days to sentence' },
   'Dismiss': { d: 'Close without sanction' }
 };
 function standardSanction(inc) {
+  const pol = S.settings.disc && S.settings.disc[inc.type]; if (pol && SANCTIONS[pol.s]) return pol.s;
   if (inc.type === 'Contraband') return 'Investigation';
   if (inc.type === 'Medical emergency') return 'Medical evaluation';
   if (inc.sev === 'Critical') return inc.type === 'Attempted escape' ? 'Refer for prosecution' : 'Solitary confinement';
   if (inc.sev === 'Major') return 'Solitary confinement';
   return 'Loss of privileges';
 }
-function applySanction(inc, s, auto) {
-  const i = getInm(inc.who); const X = SANCTIONS[s];
-  inc.status = 'Closed'; inc.action = s + (auto ? ' (auto)' : '');
+function sanctionDays(inc, s) {
+  const X = SANCTIONS[s]; if (!X.dur) return 0;
+  const pol = S.settings.disc && S.settings.disc[inc.type];
+  let d = pol && pol.s === s && pol.days ? pol.days : X.days;
+  if (S.settings.escalate && (inc.sev === 'Major' || inc.sev === 'Critical')) d *= 2;
+  return d;
+}
+function applySanction(inc, s, auto, daysOverride) {
+  const i = getInm(inc.who); const X = Object.assign({}, SANCTIONS[s]);
+  if (X.dur) X.days = daysOverride || sanctionDays(inc, s);
+  inc.status = 'Closed'; inc.action = s + (X.dur ? ` (${X.days}d)` : '') + (auto ? ' (auto)' : '');
   if (!i) return;
+  if (X.fine) { const a = Math.min(Math.max(0, i.bal), X.fine); if (a > 0) itx(i, `${s} for ${inc.id}`, -a); }
+  if (X.job && i.job) setJob(i, null);
+  if (X.psych && i.psych != null) i.psych = clamp(i.psych + X.psych);
   if (X.cost) money(-X.cost, s === 'Investigation' ? 'Security operations' : 'Healthcare', `${s} ${inc.id}`);
   if (X.beh) i.beh = clamp(i.beh + X.beh);
   if (X.disc) { const rank = { Good: 0, Warning: 1, Restricted: 2, Solitary: 3 }; if (rank[X.disc] >= rank[i.disc]) { i.disc = X.disc; i.discUntil = curDay() + X.days; } if (X.disc === 'Solitary') { if (i.job) setJob(i, null); } }
@@ -478,7 +529,7 @@ function applySanction(inc, s, auto) {
     if (i.gang && rnd() < .5) { const members = S.inm.filter(x => x.gang === i.gang && x.blk === i.blk); members.forEach(m => { m.beh = clamp(m.beh - 2); }); inc.action += ` — linked to ${i.gang}`; }
   }
   if (s === 'Medical evaluation') { i.infirm = true; }
-  if (s !== 'Dismiss') ihist(i, `Sanction for ${inc.id}: ${s}.`);
+  if (s !== 'Dismiss') ihist(i, `Sanction for ${inc.id}: ${s}${X.dur ? ' for ' + X.days + ' days' : ''}.`);
   if (s === 'Dismiss') { i.beh = clamp(i.beh + 2); }
 }
 
@@ -508,6 +559,7 @@ function paroleScore(i) {
   if (i.job) s += 6 + Math.min(8, (curDay() - i.jobSince) / 5);
   if (i.disc === 'Solitary') s -= 20; else if (i.disc === 'Restricted') s -= 10;
   s += i.recommend || 0;
+  if (i.cls === 'Insane') s += ((i.psych || 0) - 55) * .5;
   return Math.round(clamp(s, 0, 100));
 }
 function holdHearing(i) {
@@ -625,13 +677,23 @@ function dayTick() {
     if (b.status === 'Construction') { b.buildLeft--; if (b.buildLeft <= 0) { b.status = 'Open'; note('good', `${b.name} construction complete — ${blockCap(b)} ${b.cls} beds now available.`); } }
     if (b.upgrade) { b.upgrade.left--; if (b.upgrade.left <= 0) { b.tier = b.upgrade.to; b.upgrade = null; note('good', `${b.name} upgraded to Tier ${b.tier} (${TIERS[b.tier].name}).`); } }
   });
+  // --- Psychiatric care for criminally insane inmates
+  const ci = S.inm.filter(i => i.cls === 'Insane');
+  ci.forEach(i => { i.psych = clamp((i.psych == null ? 40 : i.psych) - 6 - (i.n.stress > 60 ? 3 : 0)); });
+  let rounds = staffCount('Psychiatrist', true) * 15;
+  ci.slice().sort((a, b) => a.psych - b.psych).forEach(i => { if (rounds > 0) { rounds--; i.psych = clamp(i.psych + 5); } });
+  if (ci.length && !staffCount('Psychiatrist')) note('bad', `${ci.length} criminally insane inmates have no psychiatrist. Their condition will deteriorate and incidents will rise — hire a Psychiatrist.`);
+  // --- Death row appeals
+  S.inm.filter(i => i.cls === 'DeathRow' && i.appeal).slice().forEach(i => processAppeal(i, d));
+  // --- Inmate-chosen programs: waitlisted inmates try again, some drop out
+  if (S.settings.autoEnroll) S.inm.forEach(i => { if (i.prog && i.traits.includes('Rebellious') && rnd() < .02) { ihist(i, `Dropped out of ${i.prog}.`); setProg(i, null); } });
   // --- Weather
   S.weather = wpick(WEATHER);
   if (S.weather === 'Storm' && CLASSES.some(c => S.sched[c].includes('Yard'))) note('info', 'Storm forecast today: yard time moves indoors to recreation.');
   // --- Protective custody requests
   if (S.unlock.classes.includes('Protective')) {
     S.inm.forEach(i => {
-      if (i.cls === 'Protective' || i.pcRequest) return;
+      if (i.cls === 'Protective' || i.cls === 'DeathRow' || i.cls === 'Insane' || i.pcRequest) return;
       const threat = i.rivals.filter(r => { const x = getInm(r); return x && x.blk === i.blk; }).length;
       const p = (i.n.safety < 30 ? .025 : 0) + threat * .008 + (i.traits.includes('Anxious') && i.n.safety < 45 ? .006 : 0);
       if (rnd() < p) { i.pcRequest = { d, why: pick(threat ? ['Threatened by rivals in the block', 'Debt to another inmate', 'Agreed to testify; fears retaliation'] : ['Fears for personal safety', 'Labelled an informant by other inmates', 'Left a gang and fears retaliation']) }; ihist(i, `Requested protective custody: ${i.pcRequest.why}.`); note('warn', `${iname(i)} (${i.id}) has requested protective custody: ${i.pcRequest.why}. Review it on the Security page.`); }
@@ -779,4 +841,60 @@ function transferToPC(i) {
   if (i.job && !jobEligible(i, i.job)) setJob(i, null);
   ihist(i, `Transferred from ${old} to Protective Custody (${cellLabel(i)}).`);
   return true;
+}
+
+/* ---------- Death row appeals ---------- */
+function appealOdds(i) {
+  const a = i.appeal; const st = a.stage;
+  let p = [.1, .07, .06, .04][st] || .04;
+  p += a.legal * .05;                       // funded legal representation
+  if (st === 3) p += a.support ? .1 : 0;    // administration supports clemency
+  if (i.beh > 70) p += .03;
+  if (i.certs.includes('Psychiatric Treatment') || i.prog === 'Psychiatric Treatment') p += .03;
+  if (i.incCount > 3) p -= .03;
+  return clamp(p, .01, .6);
+}
+function processAppeal(i, d) {
+  const a = i.appeal;
+  if (i.commuted) { const sp = findBed('Maximum'); if (sp) { i.cls = 'Maximum'; place(i, sp.b, sp.c); i.appeal = null; i.pendingMove = null; ihist(i, `Moved to ${cellLabel(i)} after commutation.`); } return; }
+  if (a.exec) {
+    if (d >= a.exec) {
+      if (rnd() < .05 + a.legal * .02) { a.exec = null; a.stage = 2; a.next = d + ri(20, 40); a.log.unshift({ d, x: 'Last-minute stay granted by the court. New federal review scheduled.' }); ihist(i, 'Execution stayed by the court.'); note('info', `Execution of ${iname(i)} (${i.id}) was stayed by the court.`); return; }
+      a.log.unshift({ d, x: 'Sentence carried out.' });
+      money(-15000, 'Legal & judicial', `Execution procedure ${i.id}`);
+      ihist(i, 'Death sentence carried out.');
+      S.stats.executions = (S.stats.executions || 0) + 1;
+      S.inm.forEach(x => { if (x.blk === i.blk && x.id !== i.id) x.n.stress = clamp(x.n.stress + 12); });
+      releaseInmate(i, 'Executed');
+      note('warn', `Death sentence carried out: ${iname(i)} (${i.id}), Day ${d}.`);
+    }
+    return;
+  }
+  if (d < a.next) return;
+  const stage = APPEAL_STAGES[a.stage];
+  if (rnd() < appealOdds(i)) {
+    a.log.unshift({ d, x: `${stage}: GRANTED. Death sentence commuted to life imprisonment.` });
+    ihist(i, `${stage} granted — sentence commuted to life.`);
+    commute(i);
+    note('good', `${iname(i)} (${i.id}) won their ${stage.toLowerCase()}. Sentence commuted to life; moved to Maximum security${i.cls === 'DeathRow' ? ' (no free bed yet — remains on death row until one opens)' : ''}.`);
+    return;
+  }
+  a.log.unshift({ d, x: `${stage}: denied.` });
+  ihist(i, `${stage} denied.`);
+  a.stage++; a.legal = 0;
+  if (a.stage >= APPEAL_STAGES.length) {
+    a.exec = d + 14; a.log.unshift({ d, x: `All appeals exhausted. Execution scheduled for Day ${a.exec}.` });
+    i.n.stress = clamp(i.n.stress + 25);
+    note('warn', `All appeals exhausted for ${iname(i)} (${i.id}). Execution scheduled for Day ${a.exec}.`);
+  } else {
+    a.next = d + ri(20, 35);
+    note('info', `${iname(i)} (${i.id}): ${stage.toLowerCase()} denied. Next: ${APPEAL_STAGES[a.stage]} on Day ${a.next}.`);
+  }
+}
+function commute(i) {
+  i.commuted = true;
+  const spot = findBed('Maximum');
+  i.sent = 900; i.start = curDay(); i.release = curDay() + 900; i.parole = curDay() + 630;
+  if (spot) { i.cls = 'Maximum'; place(i, spot.b, spot.c); i.appeal.done = true; i.appeal = null; ihist(i, `Moved to ${cellLabel(i)}.`); }
+  else { i.pendingMove = 'Maximum'; }
 }

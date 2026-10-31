@@ -12,11 +12,20 @@ Your prisons are saved in your browser automatically. To move a prison to anothe
 
 ## How to play
 
-1. Create a prison: choose **Sandbox** (full freedom) or **Career** (start small and unlock facilities through objectives).
+1. Create a prison: choose **Sandbox** (full freedom), **Career** (start small and unlock facilities through objectives) or **Test mode** (sandbox plus tools to spawn inmates, trigger incidents and skip time).
 2. Press **1x** (or faster) at the top to start the clock. Inmates arrive automatically at 08:00 every day.
 3. Watch the **Dashboard** action items: hire staff, build cell blocks, handle incidents, keep food stocked and the budget positive.
 
 Keyboard: **Space** pauses/resumes, **1–5** change speed. At 1x, one real second is one in-game minute.
+
+## Features
+
+- Security classifications: Minimum, Medium, Maximum, Supermax, Protective Custody, Death Row, Criminally Insane
+- Daily regimes with outdoor yard time, weather and yard capacity
+- Inmates choose their own rehabilitation programs (or let administration assign them)
+- Death row appeals: four stages, legal teams, clemency, commutation or execution
+- Psychiatrists and psychiatric treatment for criminally insane and death row inmates
+- Discipline tab: set the punishment and its duration for every incident type
 
 ## Project layout
 

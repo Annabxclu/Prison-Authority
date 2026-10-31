@@ -112,7 +112,7 @@ function showLockBanner() {
 A.lockRetry = async () => { const ok = await Lock.take(S.id); if (ok) { document.getElementById('lockBanner')?.remove(); toast('good', 'Control resumed in this window.'); try { const fresh = await Store.load(S.id); S = fresh; renderShell(); render(); } catch (e) { } } else toast('warn', 'Still open elsewhere. Try again shortly.'); };
 
 /* ================= Game loop ================= */
-const SPEEDS = [0, 1, 2, 4, 10, 30];
+const SPEEDS = [0, 1, 2, 4, 10, 30, 100];
 let lastTick = performance.now(), acc = 0, prevSpeed = 1, hiddenPaused = false;
 function setSpeed(v) { if (!S) return; if (Lock.lost && v > 0) return; if (v === 0 && S.speed > 0) { prevSpeed = S.speed; Store.save(S); } S.speed = v; updateHeader(); }
 setInterval(() => {
@@ -144,7 +144,7 @@ function renderShell() {
   $('#hdr').innerHTML = `<button class="hbtn" id="menuBtn" data-a="toggleNav">☰</button>
     <div class="brand"><div class="logo">PM</div><span class="pname">${esc(S.name)}</span></div>
     <div class="clock" id="clk"></div>
-    <div class="speeds" id="spd">${SPEEDS.map(v => `<button data-a="speed" data-arg="${v}">${v ? v + 'x' : '❚❚'}</button>`).join('')}</div>
+    <div class="speeds" id="spd">${SPEEDS.filter(v => v < 100 || S.test).map(v => `<button data-a="speed" data-arg="${v}">${v ? v + 'x' : '❚❚'}</button>`).join('')}</div>
     <div class="hstat hide-m"><span>Balance</span><b id="hBal"></b></div>
     <div class="hstat hide-m"><span>Pop</span><b id="hPop"></b></div>
     <div class="hstat" title="Employees present today / total employed"><span>Staff</span><b id="hStaff"></b></div>
@@ -156,7 +156,7 @@ function renderShell() {
 }
 function renderNav() {
   const open = S.inc.filter(x => x.status === 'Open').length, due = S.inm.filter(i => i.hearing).length;
-  $('#nav').innerHTML = NAV.map(([k, l], n) => `<a class="${UI.view === k ? 'on' : ''}" data-a="nav" data-arg="${k}"><span class="n">${String(n + 1).padStart(2, '0')}</span>${l}${k === 'security' && open ? `<span class="cnt">${open}</span>` : ''}${k === 'parole' && due ? `<span class="cnt" style="background:var(--info)">${due}</span>` : ''}${k === 'intake' && S.queue.length ? `<span class="cnt" style="background:var(--warn);color:#111">${S.queue.length}</span>` : ''}</a>`).join('');
+  $('#nav').innerHTML = NAV.filter(([k]) => k !== 'testing' || S.test).map(([k, l], n) => `<a class="${UI.view === k ? 'on' : ''}" data-a="nav" data-arg="${k}"><span class="n">${String(n + 1).padStart(2, '0')}</span>${l}${k === 'security' && open ? `<span class="cnt">${open}</span>` : ''}${k === 'parole' && due ? `<span class="cnt" style="background:var(--info)">${due}</span>` : ''}${k === 'intake' && S.queue.length ? `<span class="cnt" style="background:var(--warn);color:#111">${S.queue.length}</span>` : ''}</a>`).join('');
 }
 function updateHeader() {
   if (!S || !$('#clk')) return;
@@ -196,7 +196,7 @@ document.addEventListener('keydown', e => {
   if (e.target.closest && e.target.closest('input,select,textarea')) return;
   if (!S || $('#app').classList.contains('hide')) return;
   if (e.key === ' ') { e.preventDefault(); setSpeed(S.speed ? 0 : prevSpeed || 1); }
-  if (e.key >= '1' && e.key <= '5') setSpeed(SPEEDS[+e.key]);
+  if (e.key >= '1' && e.key <= (S.test ? '6' : '5')) setSpeed(SPEEDS[+e.key]);
   if (e.key === 'Escape' && UI.modal) closeModal();
 });
 $('#modalBg').addEventListener('click', e => { if (e.target.id === 'modalBg') closeModal(); });
@@ -239,15 +239,15 @@ function renderMenu() {
   h += `<div class="card mb"><div class="spread"><h2>Your prisons</h2><span class="tiny dim">${Store.mode === 'cloud' ? 'Saved to your Claude account' : Store.mode === 'local' ? 'Saved in this browser' : ''}</span></div>`;
   if (SLOTS == null) h += '<div class="mut small">Loading saves…</div>';
   else if (!SLOTS.length) h += '<div class="mut small">No prisons yet. Create your first one below.</div>';
-  else h += SLOTS.map(s => `<div class="slot"><div><b>${esc(s.name)}</b><div class="small mut">${s.mode === 'career' ? 'Career' : 'Sandbox'} · Day ${s.day} · ${s.pop}/${s.cap || '?'} inmates · ${fmt$(s.money)} · saved ${new Date(s.updated).toLocaleString()}</div></div><div class="row">${btn('Continue', 'loadSlot', s.slot, 'pri')}${btn('Delete', 'delSlot', s.slot, 'danger sm')}</div></div>`).join('');
+  else h += SLOTS.map(s => `<div class="slot"><div><b>${esc(s.name)}</b><div class="small mut">${modeLabel(s.mode)} · Day ${s.day} · ${s.pop}/${s.cap || '?'} inmates · ${fmt$(s.money)} · saved ${new Date(s.updated).toLocaleString()}</div></div><div class="row">${btn('Continue', 'loadSlot', s.slot, 'pri')}${btn('Delete', 'delSlot', s.slot, 'danger sm')}</div></div>`).join('');
   h += `<div class="row mt">${btn('Import save code', 'importSave', null, 'sm')}</div></div>`;
   h += `<div class="card"><h2>New prison</h2>
     <div class="field"><label class="f">Prison name</label><input type="text" data-c="ngName" value="${esc(g.name)}" style="width:100%" maxlength="40"></div>
-    <div class="field"><label class="f">Game mode</label><div class="choice" style="grid-template-columns:1fr 1fr">${cbtn('mode', 'sandbox', 'Sandbox', 'Full freedom: choose size, funds and classifications. Everything unlocked.')}${cbtn('mode', 'career', 'Career', 'Start with a small Minimum/Medium prison and unlock facilities through objectives.')}</div></div>
+    <div class="field"><label class="f">Game mode</label><div class="choice">${cbtn('mode', 'sandbox', 'Sandbox', 'Full freedom: choose size, funds and classifications. Everything unlocked.')}${cbtn('mode', 'career', 'Career', 'Start with a small Minimum/Medium prison and unlock facilities through objectives.')}${cbtn('mode', 'test', 'Test mode', 'Sandbox plus test tools: spawn inmates, trigger incidents, skip time, 100x speed.')}</div></div>
     ${career ? '<div class="alert info">Career starts as a Small prison (50 beds, Minimum + Medium) with $150,000.</div>' : `
     <div class="field"><label class="f">Prison size</label><div class="choice">${cbtn('size', 'Small', 'Small', '50 beds')}${cbtn('size', 'Medium', 'Medium', '150 beds')}${cbtn('size', 'Large', 'Large', '300 beds')}</div></div>
     <div class="field"><label class="f">Security classifications</label>${CLASSES.map(c => `<label class="chk"><input type="checkbox" data-c="ngCls" data-arg="${c}"${g.classes.includes(c) ? ' checked' : ''}> ${CLS_LABEL[c]}</label>`).join('')}</div>
-    <div class="field"><label class="f">Starting funds</label>${seg('ng_funds', g.funds, [['250000', '$250k'], ['500000', '$500k'], ['1000000', '$1M'], ['5000000', '$5M']])}</div>`}
+    <div class="field"><label class="f">Starting funds</label>${g.mode === 'test' ? '<span class="small mut">$10,000,000 in test mode</span>' : ''}${g.mode === 'test' ? '' : seg('ng_funds', g.funds, [['250000', '$250k'], ['500000', '$500k'], ['1000000', '$1M'], ['5000000', '$5M']])}</div>`}
     <div class="grid g3"><div class="field"><label class="f">Population</label>${seg('ng_pop', g.pop, [['Male', 'Male'], ['Female', 'Female']])}</div>
     <div class="field"><label class="f">Starting employees</label>${seg('ng_staff', g.staff, [['recommended', 'Recommended'], ['minimal', 'Minimal'], ['none', 'None']])}</div>
     <div class="field"><label class="f">Daily intake</label>${seg('ng_intake', g.intake, [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']])}</div></div>
@@ -262,9 +262,9 @@ A.startGame = async () => {
   const g = UI.ng; const career = g.mode === 'career';
   const size = career ? 'Small' : g.size;
   const mult = { low: .6, normal: 1, high: 1.6 }[g.intake];
-  const base = { Small: { Minimum: 3, Medium: 4, Maximum: 2, Supermax: 1, Protective: 1 }, Medium: { Minimum: 3, Medium: 5, Maximum: 2, Supermax: 1, Protective: 1 }, Large: { Minimum: 6, Medium: 8, Maximum: 4, Supermax: 2, Protective: 1 } }[size];
-  const intake = {}; CLASSES.forEach(c => intake[c] = Math.max(c === 'Supermax' || c === 'Protective' ? 0 : 1, Math.round(base[c] * mult)));
-  const cfg = { name: (g.name || 'New Prison').trim().slice(0, 40), mode: g.mode, size, pop: g.pop, funds: career ? 150000 : +g.funds, staff: g.staff, classes: career ? null : CLASSES.filter(c => g.classes.includes(c)), intake, overflow: g.overflow };
+  const base = { Small: { Minimum: 3, Medium: 4, Maximum: 2, Supermax: 1, Protective: 1, DeathRow: .1, Insane: .3 }, Medium: { Minimum: 3, Medium: 5, Maximum: 2, Supermax: 1, Protective: 1, DeathRow: .2, Insane: .5 }, Large: { Minimum: 6, Medium: 8, Maximum: 4, Supermax: 2, Protective: 1, DeathRow: .3, Insane: .8 } }[size];
+  const intake = {}; CLASSES.forEach(c => intake[c] = base[c] < 1 ? Math.round(base[c] * mult * 10) / 10 : Math.max(c === 'Supermax' || c === 'Protective' ? 0 : 1, Math.round(base[c] * mult)));
+  const cfg = { name: (g.name || 'New Prison').trim().slice(0, 40), mode: g.mode, size, pop: g.pop, funds: career ? 150000 : g.mode === 'test' ? 10000000 : +g.funds, staff: g.staff, classes: career ? null : CLASSES.filter(c => g.classes.includes(c)), intake, overflow: g.overflow };
   newState(cfg);
   UI.view = 'dashboard'; UI.build = null; for (const k in TS) delete TS[k];
   await Store.save(S);
@@ -289,7 +289,10 @@ function migrate(st) {
   ['intake', 'funding'].forEach(k => { if (st.settings[k].Protective == null) st.settings[k].Protective = k === 'intake' ? 0 : DEFAULT_FUNDING.Protective; });
   if (st.yards == null) { st.yards = Math.max(1, Math.ceil(sum(st.blocks, b => sum(b.cells, c => c.beds)) / 150)); CLASSES.forEach(c => { const s = st.sched[c]; const k = s.indexOf('Recreation'); if (k >= 0 && !s.includes('Yard')) s[k] = 'Yard'; }); }
   if (!st.weather) st.weather = 'Clear';
-  if (st.mode !== 'career' && !st.unlock.classes.includes('Protective')) st.unlock.classes.push('Protective');
+  if (st.mode !== 'career') CLASSES.forEach(c => { if (!st.unlock.classes.includes(c)) st.unlock.classes.push(c); });
+  CLASSES.forEach(c => { if (!st.sched[c]) st.sched[c] = defaultSchedule(c); if (st.settings.intake[c] == null) st.settings.intake[c] = 0; if (st.settings.funding[c] == null) st.settings.funding[c] = DEFAULT_FUNDING[c]; });
+  PROG_NAMES.forEach(p => { if (!st.progs[p]) st.progs[p] = { on: true, cap: 30, elig: PROGRAMS[p].elig.slice(), completions: 0 }; if (st.unlock.progs[p] == null) st.unlock.progs[p] = true; });
+  if (!st.settings.disc) st.settings.disc = defaultDiscipline(); if (st.settings.escalate == null) st.settings.escalate = true; if (!st.settings.progChoice) st.settings.progChoice = 'inmate';
 }
 
 /* ================= Boot ================= */
