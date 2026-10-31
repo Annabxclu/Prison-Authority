@@ -98,7 +98,7 @@ tr.click{cursor:pointer}
 
 /* Tags & bars */
 .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;font-family:var(--mono);border:1px solid currentColor;line-height:1.5}
-.c-Minimum{color:var(--min)} .c-Medium{color:var(--med)} .c-Maximum{color:var(--max)} .c-Supermax{color:var(--smx)}
+.c-Minimum{color:var(--min)} .c-Medium{color:var(--med)} .c-Maximum{color:var(--max)} .c-Supermax{color:var(--smx)} .c-Protective{color:#c38cf0}
 .sv-Minor{color:var(--mut)} .sv-Moderate{color:var(--warn)} .sv-Major{color:#ff8a4c} .sv-Critical{color:var(--bad)}
 .bar{height:6px;background:#0b0e11;border-radius:3px;overflow:hidden;min-width:60px}
 .bar i{display:block;height:100%;background:var(--good)}

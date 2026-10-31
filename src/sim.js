@@ -215,13 +215,14 @@ function effectiveAct(i, act, b, cov) {
   if (i.disc === 'Solitary') return act === 'Sleep' ? 'Sleep' : act === 'Meal' ? 'Meal' : act === 'Shower' && rnd() < .3 ? 'Shower' : 'Solitary';
   if (b.status === 'Lockdown' && !['Sleep', 'Meal', 'Wake'].includes(act)) return 'Lockdown';
   if (act === 'Visits' && !S.settings.visitDays[dow()]) act = 'Free';
-  if (i.disc === 'Restricted' && ['Recreation', 'Free', 'Visits'].includes(act)) return 'Lockdown';
-  if (cov < .5 && ['Recreation', 'Free', 'Visits', 'Work', 'Rehab'].includes(act)) { hourFlags.cancel = hourFlags.cancel || {}; hourFlags.cancel[b.id] = true; return 'Lockdown'; }
+  if (act === 'Yard' && S.weather === 'Storm') act = 'Recreation';
+  if (i.disc === 'Restricted' && ['Recreation', 'Yard', 'Free', 'Visits'].includes(act)) return 'Lockdown';
+  if (cov < .5 && ['Recreation', 'Yard', 'Free', 'Visits', 'Work', 'Rehab'].includes(act)) { hourFlags.cancel = hourFlags.cancel || {}; hourFlags.cancel[b.id] = true; return 'Lockdown'; }
   if (act === 'Work' && !i.job) return 'Idle';
   if (act === 'Rehab' && !i.prog) return 'Idle';
   return act;
 }
-const LOC = { Sleep: 'Cell (asleep)', Wake: 'Cell', Meal: 'Dining hall', Work: 'Work assignment', Recreation: 'Recreation yard', Rehab: 'Program room', Shower: 'Showers', Free: 'Common area', Visits: 'Visitation room', Lockdown: 'Cell (locked)', Idle: 'Cell block', Infirmary: 'Infirmary', Solitary: 'Solitary confinement' };
+const LOC = { Sleep: 'Cell (asleep)', Wake: 'Cell', Meal: 'Dining hall', Work: 'Work assignment', Recreation: 'Gym / day room', Yard: 'Exercise yard', Rehab: 'Program room', Shower: 'Showers', Free: 'Common area', Visits: 'Visitation room', Lockdown: 'Cell (locked)', Idle: 'Cell block', Infirmary: 'Infirmary', Solitary: 'Solitary confinement' };
 
 function hourTick(h) {
   hourFlags = {};
@@ -252,14 +253,16 @@ function hourTick(h) {
   // medical capacity
   let medCap = staffCount('Medical Staff', true) * 6;
 
-  let wages = 0, workshopHrs = 0;
+  let wages = 0, workshopHrs = 0, yardUsed = 0; const yardCap = (S.yards || 0) * YARD_CAP;
+  const yardGP = [], yardPC = [];
   const visitDay = S.settings.visitDays[dow()];
   const blockRivals = {};
 
   for (const i of S.inm) {
     const b = getBlock(i.blk); if (!b) continue;
     const c = cov[b.id] == null ? 1 : cov[b.id];
-    const act = effectiveAct(i, S.sched[i.cls][h], b, c);
+    let act = effectiveAct(i, S.sched[i.cls][h], b, c);
+    if (act === 'Yard') { if (yardUsed >= yardCap) { act = 'Lockdown'; hourFlags.yardFull = (hourFlags.yardFull || 0) + 1; } else { yardUsed++; (i.cls === 'Protective' ? yardPC : yardGP).push(i); } }
     i.loc = LOC[act] || act;
     const n = i.n;
     // base decay
@@ -276,7 +279,8 @@ function hourTick(h) {
         else { n.stress += 6; }
         break;
       case 'Shower': n.hygiene += 55; break;
-      case 'Recreation': n.rec += 30 + libBonus; n.social += 8; n.stress -= 4; break;
+      case 'Recreation': n.rec += 26 + libBonus; n.social += 7; n.stress -= 3; break;
+      case 'Yard': { const w = S.weather === 'Rain' ? .6 : 1; n.rec += 36 * w; n.social += 10 * w; n.stress -= 6 * w; n.health += .6 * w; if (S.weather === 'Rain') n.hygiene -= 3; if (S.weather === 'Clear') n.comfort += 1.5; break; }
       case 'Free': n.social += 14; n.rec += 9 + libBonus / 2; n.stress -= 2; break;
       case 'Work':
         n.rec += 4; n.stress -= 1.5; n.social += 3;
@@ -319,6 +323,7 @@ function hourTick(h) {
     // incidents
     if (!asleep && act !== 'Infirmary') rollIncident(i, b, c, act, blockRivals[i.id]);
   }
+  if (yardPC.length && yardGP.length) yardClash(yardPC, yardGP);
   if (wages > 0) accrue(wages, 'Inmate wages');
   if (workshopHrs > 0) { const r = workshopHrs * 11; S.money += r; T.income['Workshop contracts'] = (T.income['Workshop contracts'] || 0) + r; }
 
@@ -330,6 +335,7 @@ function hourTick(h) {
   // flags → notes (once per day per type)
   if (hourFlags.mealShort && !T.flagMeal) { T.flagMeal = true; note('bad', `Meal shortage: ${hourFlags.mealShort} inmates went without a meal. ${S.food < S.inm.length ? 'Food inventory is too low.' : 'Kitchen capacity is too low — hire kitchen workers or assign inmate kitchen jobs.'}`, true); }
   if (hourFlags.cancel) for (const bid in hourFlags.cancel) { if (!T.cancelled[bid]) { T.cancelled[bid] = true; const b = getBlock(bid); note('warn', `${b.name}: activities cancelled — fewer than half the required officers on ${shift.toLowerCase()} shift.`); incidentStaffShortage(b); } }
+  if (hourFlags.yardFull && !T.flagYard) { T.flagYard = true; note('warn', `Yard over capacity at ${String(h).padStart(2, '0')}:00: ${hourFlags.yardFull} inmates stayed in their cells. Build another exercise yard (Housing) or stagger yard times in Regimes.`); }
   if (hourFlags.progShort && !T.flagProg) { T.flagProg = true; note('warn', `Rehabilitation sessions over capacity: ${Object.keys(hourFlags.progShort).join(', ')}. Some enrolled inmates could not attend — hire more program staff.`); }
   // sample needs for daily average
   if (h % 4 === 0) { T.needSamples++; T.needAcc = T.needAcc || { hunger: 0, hygiene: 0, rec: 0, health: 0, social: 0, comfort: 0, stress: 0, safety: 0, sat: 0 }; for (const k in T.needAcc) T.needAcc[k] += k === 'sat' ? avg(S.inm, satisfaction) : avgNeed(k); }
@@ -353,10 +359,11 @@ function rollIncident(i, b, cov, act, rivalsHere) {
   p *= 1 + Math.max(0, 1 - cov) * 2.5;
   p *= 1.7 - i.beh / 100;
   p *= CLS_MULT[i.cls];
-  p *= { Recreation: 1.5, Free: 1.4, Meal: 1.25, Work: .8, Rehab: .6, Lockdown: .5, Solitary: .15, Visits: 1.1, Shower: 1.1, Idle: 1.2, Wake: .8 }[act] || 1;
+  p *= { Yard: 1.6, Recreation: 1.4, Free: 1.4, Meal: 1.25, Work: .8, Rehab: .6, Lockdown: .5, Solitary: .15, Visits: 1.1, Shower: 1.1, Idle: 1.2, Wake: .8 }[act] || 1;
   p *= 1 + rivalsHere * .3 + b.contraband / 120;
   if (i.disc === 'Solitary') p *= .3;
   if (rnd() < p) {
+    if (i.cls === 'Protective') { makeIncident(i, b, wpick([['Argument', 40], ['Refusal to follow instructions', 30], ['Property damage', 10], ['Contraband', 10]]), cov); return; }
     const type = wpick([
       ['Argument', 30], ['Refusal to follow instructions', 20 * (i.traits.includes('Rebellious') ? 2 : 1)],
       ['Fight', 13 * (i.traits.includes('Aggressive') ? 2 : 1) * (1 + rivalsHere)], ['Property damage', 9],
@@ -540,7 +547,7 @@ function dayTick() {
   const maintReq = Math.ceil(beds / 75); const maintOK = maintReq ? Math.min(1, staffCount('Maintenance Worker') / maintReq) : 1;
   const inmMaint = Math.min(.35, (jobFilled('Maintenance') * .05 + jobFilled('Janitorial') * .02));
   const maint = beds * 1.2 * (1 + (1 - maintOK) * 1.5) * (1 - inmMaint);
-  money(-maint, 'Maintenance', 'Facility maintenance');
+  money(-maint - (S.yards || 0) * 150, 'Maintenance', 'Facility & yard maintenance');
   const health = pop * 2 + S.inm.filter(i => i.infirm).length * 30;
   if (health) money(-health, 'Healthcare', 'Healthcare supplies & treatment');
   const secOps = staffCount('Correctional Officer') * 6;
@@ -618,6 +625,19 @@ function dayTick() {
     if (b.status === 'Construction') { b.buildLeft--; if (b.buildLeft <= 0) { b.status = 'Open'; note('good', `${b.name} construction complete — ${blockCap(b)} ${b.cls} beds now available.`); } }
     if (b.upgrade) { b.upgrade.left--; if (b.upgrade.left <= 0) { b.tier = b.upgrade.to; b.upgrade = null; note('good', `${b.name} upgraded to Tier ${b.tier} (${TIERS[b.tier].name}).`); } }
   });
+  // --- Weather
+  S.weather = wpick(WEATHER);
+  if (S.weather === 'Storm' && CLASSES.some(c => S.sched[c].includes('Yard'))) note('info', 'Storm forecast today: yard time moves indoors to recreation.');
+  // --- Protective custody requests
+  if (S.unlock.classes.includes('Protective')) {
+    S.inm.forEach(i => {
+      if (i.cls === 'Protective' || i.pcRequest) return;
+      const threat = i.rivals.filter(r => { const x = getInm(r); return x && x.blk === i.blk; }).length;
+      const p = (i.n.safety < 30 ? .025 : 0) + threat * .008 + (i.traits.includes('Anxious') && i.n.safety < 45 ? .006 : 0);
+      if (rnd() < p) { i.pcRequest = { d, why: pick(threat ? ['Threatened by rivals in the block', 'Debt to another inmate', 'Agreed to testify; fears retaliation'] : ['Fears for personal safety', 'Labelled an informant by other inmates', 'Left a gang and fears retaliation']) }; ihist(i, `Requested protective custody: ${i.pcRequest.why}.`); note('warn', `${iname(i)} (${i.id}) has requested protective custody: ${i.pcRequest.why}. Review it on the Security page.`); }
+    });
+    S.inm.forEach(i => { if (i.pcRequest && d - i.pcRequest.d >= 5) { i.pcRequest = null; i.n.stress = clamp(i.n.stress + 10); } });
+  }
   // --- Relationships, candidates, auto-jobs/enrol
   dailyRelationships();
   if (d % 2 === 0) S.cands = genCandidates();
@@ -734,4 +754,29 @@ function autoAssignOfficers(silent) {
     for (; idx < pool.length; idx++) pool[idx].assign = order.length ? order[idx % order.length].b.id : null;
   }
   if (!silent) note('info', `Officers re-assigned across ${blocks.length} blocks and two shifts.`);
+}
+
+/* ---------- Protective custody ---------- */
+function yardClash(pcList, gpList) {
+  // Protective custody inmates sharing the yard with general population are at serious risk
+  for (const v of pcList) {
+    v.n.safety = clamp(v.n.safety - 12); v.n.stress = clamp(v.n.stress + 8);
+    if (rnd() < .06) {
+      const a = pick(gpList); const b = getBlock(a.blk);
+      const dmg = ri(15, 40); v.n.health = clamp(v.n.health - dmg); rival(a, v);
+      incident(a, 'Assault on protective custody', `${iname(a)} attacked protective custody inmate ${iname(v)} (${v.pc || 'PC'}) in the exercise yard. PC and general population were scheduled in the yard at the same time.`, dmg > 30 ? 'Critical' : 'Major', b, false, [v]);
+    }
+  }
+  if (!S.today.flagPCYard) { S.today.flagPCYard = true; note('bad', 'Protective custody inmates are sharing the yard with general population. Give Protective Custody a separate yard time in Regimes.', true); }
+}
+function transferToPC(i) {
+  const spot = findBed('Protective');
+  if (!spot) return false;
+  const old = i.cls; i.cls = 'Protective'; place(i, spot.b, spot.c);
+  i.parole = i.start + Math.ceil(i.sent * PAROLE_FRAC.Protective);
+  i.pc = i.pcRequest ? i.pcRequest.why : 'Administrative placement'; i.pcRequest = null; i.gang = null;
+  i.n.safety = clamp(i.n.safety + 25); i.n.stress = clamp(i.n.stress - 15);
+  if (i.job && !jobEligible(i, i.job)) setJob(i, null);
+  ihist(i, `Transferred from ${old} to Protective Custody (${cellLabel(i)}).`);
+  return true;
 }

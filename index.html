@@ -101,7 +101,7 @@ tr.click{cursor:pointer}
 
 /* Tags & bars */
 .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;font-family:var(--mono);border:1px solid currentColor;line-height:1.5}
-.c-Minimum{color:var(--min)} .c-Medium{color:var(--med)} .c-Maximum{color:var(--max)} .c-Supermax{color:var(--smx)}
+.c-Minimum{color:var(--min)} .c-Medium{color:var(--med)} .c-Maximum{color:var(--max)} .c-Supermax{color:var(--smx)} .c-Protective{color:#c38cf0}
 .sv-Minor{color:var(--mut)} .sv-Moderate{color:var(--warn)} .sv-Major{color:#ff8a4c} .sv-Critical{color:var(--bad)}
 .bar{height:6px;background:#0b0e11;border-radius:3px;overflow:hidden;min-width:60px}
 .bar i{display:block;height:100%;background:var(--good)}
@@ -210,15 +210,19 @@ const wpick = (items) => { let t = sum(items, x => x[1]); let r = rnd() * t; for
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 /* ================= Constants ================= */
-const CLASSES = ['Minimum', 'Medium', 'Maximum', 'Supermax'];
-const CLS_SHORT = { Minimum: 'MIN', Medium: 'MED', Maximum: 'MAX', Supermax: 'SMX' };
-const CLS_MULT = { Minimum: .7, Medium: 1, Maximum: 1.4, Supermax: 1.7 };
-const OFFICER_RATIO = { Minimum: 20, Medium: 12, Maximum: 6, Supermax: 3 };
-const PAROLE_FRAC = { Minimum: .5, Medium: .6, Maximum: .7, Supermax: .85 };
-const DEFAULT_FUNDING = { Minimum: 60, Medium: 75, Maximum: 110, Supermax: 180 };
-const DEFAULT_INTAKE = { Minimum: 5, Medium: 10, Maximum: 4, Supermax: 1 };
-const BEDS_PER_CELL = { Minimum: 2, Medium: 2, Maximum: 1, Supermax: 1 };
-const CELL_BASE_COST = { Minimum: 2200, Medium: 2800, Maximum: 4200, Supermax: 7000 };
+const CLASSES = ['Minimum', 'Medium', 'Maximum', 'Supermax', 'Protective'];
+const CLS_SHORT = { Minimum: 'MIN', Medium: 'MED', Maximum: 'MAX', Supermax: 'SMX', Protective: 'PC' };
+const CLS_LABEL = { Minimum: 'Minimum', Medium: 'Medium', Maximum: 'Maximum', Supermax: 'Supermax', Protective: 'Protective Custody' };
+const CLS_MULT = { Minimum: .7, Medium: 1, Maximum: 1.4, Supermax: 1.7, Protective: .6 };
+const OFFICER_RATIO = { Minimum: 20, Medium: 12, Maximum: 6, Supermax: 3, Protective: 8 };
+const PAROLE_FRAC = { Minimum: .5, Medium: .6, Maximum: .7, Supermax: .85, Protective: .6 };
+const DEFAULT_FUNDING = { Minimum: 60, Medium: 75, Maximum: 110, Supermax: 180, Protective: 105 };
+const DEFAULT_INTAKE = { Minimum: 5, Medium: 10, Maximum: 4, Supermax: 1, Protective: 1 };
+const BEDS_PER_CELL = { Minimum: 2, Medium: 2, Maximum: 1, Supermax: 1, Protective: 1 };
+const CELL_BASE_COST = { Minimum: 2200, Medium: 2800, Maximum: 4200, Supermax: 7000, Protective: 4000 };
+const PC_REASONS = ['Former police officer', 'Former corrections officer', 'Informant / cooperating witness', 'Gang dropout', 'High-profile case', 'Vulnerable (age or health)', 'Former prosecutor\'s investigator', 'Testified against co-defendants'];
+const YARD_CAP = 100, YARD_COST = 30000;
+const WEATHER = [['Clear', 45], ['Cloudy', 30], ['Rain', 18], ['Storm', 7]];
 const TIERS = {
   1: { name: 'Basic', util: 2, cellCost: 0, comfort: -1.2, desc: 'Bed, toilet, basic amenities' },
   2: { name: 'Standard', util: 3.5, cellCost: 1800, comfort: 0, desc: 'Adds shower access and extra basics' },
@@ -262,7 +266,8 @@ const ACTS = {
   Wake: { c: '#6b7c93', l: 'Wake up' },
   Meal: { c: '#4cc38a', l: 'Meal' },
   Work: { c: '#e8b931', l: 'Employment' },
-  Recreation: { c: '#5aa9e6', l: 'Recreation' },
+  Yard: { c: '#3fae6a', l: 'Yard (outdoors)' },
+  Recreation: { c: '#5aa9e6', l: 'Recreation (indoor)' },
   Rehab: { c: '#b48ef0', l: 'Rehabilitation' },
   Shower: { c: '#45c4c4', l: 'Shower' },
   Free: { c: '#8fbf5a', l: 'Free time' },
@@ -275,30 +280,31 @@ function defaultSchedule(cls) {
   s[6] = 'Wake'; s[7] = 'Meal';
   if (cls === 'Supermax') {
     for (let h = 8; h < 24; h++) s[h] = 'Lockdown';
-    s[12] = 'Meal'; s[13] = 'Recreation'; s[14] = 'Rehab'; s[16] = 'Shower'; s[17] = 'Meal'; s[22] = s[23] = 'Sleep';
+    s[12] = 'Meal'; s[11] = 'Yard'; s[13] = 'Recreation'; s[14] = 'Rehab'; s[16] = 'Shower'; s[17] = 'Meal'; s[22] = s[23] = 'Sleep';
     return s;
   }
-  s[8] = s[9] = s[10] = s[11] = 'Work'; s[12] = 'Meal'; s[13] = 'Recreation';
+  s[8] = s[9] = s[10] = s[11] = 'Work'; s[12] = 'Meal'; s[13] = 'Yard';
   s[14] = s[15] = 'Rehab'; s[16] = 'Shower'; s[17] = 'Meal'; s[18] = 'Visits';
-  s[19] = s[20] = 'Free'; s[21] = 'Lockdown';
-  if (cls === 'Maximum') { s[10] = s[11] = 'Lockdown'; s[19] = 'Lockdown'; }
+  s[19] = 'Recreation'; s[20] = 'Free'; s[21] = 'Lockdown';
+  if (cls === 'Maximum') { s[10] = s[11] = 'Lockdown'; s[13] = 'Recreation'; s[15] = 'Yard'; s[20] = 'Lockdown'; }
+  if (cls === 'Protective') { s[13] = 'Recreation'; s[14] = 'Yard'; s[15] = 'Rehab'; }
   return s;
 }
 
 const JOBS = {
   Kitchen: { pos: 6, wage: 1.0, elig: ['Minimum', 'Medium'], desc: 'Each worker adds 15 meals per sitting' },
-  Laundry: { pos: 5, wage: .8, elig: ['Minimum', 'Medium'], desc: 'Improves hygiene across the prison' },
+  Laundry: { pos: 5, wage: .8, elig: ['Minimum', 'Medium', 'Protective'], desc: 'Improves hygiene across the prison' },
   Janitorial: { pos: 8, wage: .7, elig: ['Minimum', 'Medium', 'Maximum'], desc: 'Reduces maintenance costs, improves comfort' },
   Maintenance: { pos: 4, wage: 1.1, elig: ['Minimum'], desc: 'Reduces maintenance costs and damage repairs' },
   Workshop: { pos: 10, wage: 1.5, elig: ['Minimum', 'Medium'], desc: 'Produces contract goods: $11 revenue per worker-hour' },
-  Library: { pos: 3, wage: .7, elig: ['Minimum', 'Medium', 'Maximum'], desc: 'Improves recreation for all inmates' },
+  Library: { pos: 3, wage: .7, elig: ['Minimum', 'Medium', 'Maximum', 'Protective'], desc: 'Improves recreation for all inmates' },
   Canteen: { pos: 3, wage: .8, elig: ['Minimum', 'Medium'], desc: 'Lets inmates make purchases (prison keeps 25%)' }
 };
 const JOB_NAMES = Object.keys(JOBS);
 
 const PROGRAMS = {
-  'Education': { role: 'Teacher', per: 15, hrs: 60, elig: ['Minimum', 'Medium', 'Maximum'], cert: 'GED Certificate', fx: { beh: 8, parole: 10 } },
-  'Vocational Training': { role: 'Teacher', per: 12, hrs: 80, elig: ['Minimum', 'Medium'], cert: 'Trade Certificate', fx: { beh: 6, parole: 14 } },
+  'Education': { role: 'Teacher', per: 15, hrs: 60, elig: ['Minimum', 'Medium', 'Maximum', 'Protective'], cert: 'GED Certificate', fx: { beh: 8, parole: 10 } },
+  'Vocational Training': { role: 'Teacher', per: 12, hrs: 80, elig: ['Minimum', 'Medium', 'Protective'], cert: 'Trade Certificate', fx: { beh: 6, parole: 14 } },
   'Life Skills': { role: 'Rehabilitation Specialist', per: 15, hrs: 30, elig: CLASSES, cert: 'Life Skills Certificate', fx: { beh: 6, parole: 6 } },
   'Anger Management': { role: 'Psychologist', per: 10, hrs: 30, elig: CLASSES, cert: 'Anger Management Completion', fx: { beh: 12, parole: 10, calm: true } },
   'Substance Recovery': { role: 'Rehabilitation Specialist', per: 12, hrs: 50, elig: CLASSES, cert: 'Recovery Program Completion', fx: { beh: 8, parole: 12 } },
@@ -313,7 +319,7 @@ const CHARGES = {
   4: ['Armed robbery', 'Kidnapping', 'Manslaughter', 'Organized crime', 'Weapons trafficking'],
   5: ['Murder', 'Attempted murder', 'Serial armed robbery', 'Criminal enterprise leadership']
 };
-const SEV_RANGE = { Minimum: [1, 2], Medium: [2, 3], Maximum: [3, 4], Supermax: [4, 5] };
+const SEV_RANGE = { Minimum: [1, 2], Medium: [2, 3], Maximum: [3, 4], Supermax: [4, 5], Protective: [1, 4] };
 const SENT_RANGE = { 1: [20, 60], 2: [40, 120], 3: [90, 240], 4: [180, 450], 5: [365, 900] };
 const SEV_LABEL = { 1: 'Low', 2: 'Moderate', 3: 'Serious', 4: 'Severe', 5: 'Extreme' };
 
@@ -332,7 +338,7 @@ const CAREER = [
     reward: 'Grant: $30,000', give: () => { grant(30000, 'Stability grant'); } },
   { id: 'grow', t: 'Growing population', d: 'Build a new cell block and house 45 inmates at once.',
     ok: () => S.stats.blocksBuilt >= 1 && S.inm.length >= 45,
-    reward: 'Unlock Maximum security + $40,000', give: () => { unlockClass('Maximum'); grant(40000, 'Expansion grant'); } },
+    reward: 'Unlock Maximum security + Protective Custody + $40,000', give: () => { unlockClass('Maximum'); unlockClass('Protective'); grant(40000, 'Expansion grant'); } },
   { id: 'rehab', t: 'Second chances', d: 'Have inmates complete 8 rehabilitation programs.',
     ok: () => S.stats.completions >= 8,
     reward: 'Unlock Vocational Training and Workshop jobs', give: () => { S.unlock.progs['Vocational Training'] = true; S.unlock.jobs.Workshop = true; } },
@@ -379,7 +385,7 @@ function newState(cfg) {
       progs: {}, jobs: {}, bonus: cfg.mode !== 'career'
     },
     sched: {}, blocks: [], inm: [], released: [], queue: [], staff: [], cands: [],
-    jobs: {}, progs: {}, food: 0, inc: [], notes: [], tx: [], hist: [], arrivals: [],
+    jobs: {}, progs: {}, food: 0, yards: cfg.size === 'Large' && cfg.mode !== 'career' ? 3 : cfg.size === 'Medium' && cfg.mode !== 'career' ? 2 : 1, weather: 'Clear', inc: [], notes: [], tx: [], hist: [], arrivals: [],
     today: null, yday: null, career: { idx: 0, done: [] },
     stats: { completions: 0, paroleApproved: 0, paroleDenied: 0, releases: 0, escapes: 0, lastEscapeDay: null, blocksBuilt: 0, bestInspection: 0, flagship: false, transfers: 0 },
     inspections: [], lastInspectDay: -99, reports: []
@@ -394,8 +400,8 @@ function newState(cfg) {
   // Starting blocks
   const plans = {
     Small: [['A Block', 'Minimum', 10, 2, 1], ['B Block', 'Medium', 15, 2, 1]],
-    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Maximum', 40, 1, 1], ['Segregation Unit', 'Supermax', 10, 1, 2]],
-    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 60, 1, 1], ['Segregation Unit', 'Supermax', 20, 1, 2]]
+    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Maximum', 30, 1, 1], ['Segregation Unit', 'Supermax', 10, 1, 2], ['PC Unit', 'Protective', 10, 1, 2]],
+    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 45, 1, 1], ['Segregation Unit', 'Supermax', 20, 1, 2], ['PC Unit', 'Protective', 15, 1, 2]]
   };
   let plan = cfg.mode === 'career' ? plans.Small : plans[cfg.size];
   if (cfg.mode !== 'career' && cfg.classes) {
@@ -403,7 +409,7 @@ function newState(cfg) {
     const total = sum(plan, p => p[2] * p[3]);
     plan = plan.filter(p => cfg.classes.includes(p[1]));
     const missing = cfg.classes.filter(c => !plan.some(p => p[1] === c));
-    missing.forEach((c, i) => plan.push([String.fromCharCode(65 + plan.length) + ' Block', c, 10, BEDS_PER_CELL[c], 1]));
+    missing.forEach((c, i) => plan.push([c === 'Protective' ? 'PC Unit' : c === 'Supermax' ? 'Segregation Unit' : String.fromCharCode(65 + plan.length) + ' Block', c, 10, BEDS_PER_CELL[c], 1]));
     let have = sum(plan, p => p[2] * p[3]);
     if (plan.length && have < total) {
       const f = total / have; plan = plan.map(p => [p[0], p[1], Math.max(1, Math.round(p[2] * f)), p[3], p[4]]);
@@ -488,7 +494,7 @@ function genInmate(cls) {
   const sent = Math.round(ri(s1, s2) * (1 + priors * .07) * (1 + (charges.length - 1) * .15));
   // traits
   const pool = [];
-  TRAIT_NAMES.forEach(t => { let w = 10; if (cls === 'Supermax' || cls === 'Maximum') { if (['Aggressive', 'Rebellious', 'Manipulative', 'Leadership-oriented'].includes(t)) w = 18; if (['Cooperative', 'Calm'].includes(t)) w = 5; } if (cls === 'Minimum' && ['Cooperative', 'Calm', 'Hardworking', 'Introverted'].includes(t)) w = 16; pool.push([t, w]); });
+  TRAIT_NAMES.forEach(t => { let w = 10; if (cls === 'Protective') { if (['Introverted', 'Anxious', 'Cooperative', 'Calm'].includes(t)) w = 18; if (['Aggressive', 'Rebellious'].includes(t)) w = 3; } if (cls === 'Supermax' || cls === 'Maximum') { if (['Aggressive', 'Rebellious', 'Manipulative', 'Leadership-oriented'].includes(t)) w = 18; if (['Cooperative', 'Calm'].includes(t)) w = 5; } if (cls === 'Minimum' && ['Cooperative', 'Calm', 'Hardworking', 'Introverted'].includes(t)) w = 16; pool.push([t, w]); });
   const traits = [wpick(pool)]; let t2; do { t2 = wpick(pool); } while (t2 === traits[0] || (t2 === 'Calm' && traits[0] === 'Anxious') || (t2 === 'Anxious' && traits[0] === 'Calm') || (t2 === 'Cooperative' && traits[0] === 'Rebellious') || (t2 === 'Rebellious' && traits[0] === 'Cooperative'));
   traits.push(t2);
   const traitRisk = sum(traits, t => (TRAITS[t].inc - 1) * 12);
@@ -496,7 +502,7 @@ function genInmate(cls) {
   const risk = riskScore < 30 ? 'Low' : riskScore < 48 ? 'Moderate' : riskScore < 66 ? 'High' : 'Extreme';
   const pre = Math.floor(sent * rnd() * .15);
   const d = curDay();
-  const gangP = { Minimum: .04, Medium: .14, Maximum: .3, Supermax: .45 }[cls];
+  const gangP = { Minimum: .04, Medium: .14, Maximum: .3, Supermax: .45, Protective: 0 }[cls];
   const i = {
     id, fn, ln, age: ri(18, 64 - (rnd() < .6 ? 25 : 0)), g: S.pop, adm: d, cls, risk, charges, sev, priors, sent,
     start: d - pre, parole: d + Math.max(2, Math.ceil(sent * PAROLE_FRAC[cls]) - pre), release: d + sent - pre,
@@ -507,9 +513,11 @@ function genInmate(cls) {
     job: null, jobSince: 0, jobHist: [], earn: 0, bal: ri(0, 40), tx: [],
     prog: null, progHrs: 0, progStart: 0, progHist: [], certs: [],
     friends: [], rivals: [], gang: rnd() < gangP ? pick(GANGS) : null,
-    hist: [], hearing: null, infirm: false, sick: false, loc: 'Intake', paroleRec: 0, hearings: 0
+    hist: [], hearing: null, infirm: false, sick: false, loc: 'Intake', paroleRec: 0, hearings: 0,
+    pc: cls === 'Protective' ? pick(PC_REASONS) : null
   };
-  ihist(i, `Admitted. Charges: ${charges.join(', ')}. Sentence ${sent} days.`);
+  if (i.pc === 'Vulnerable (age or health)') i.age = ri(58, 79);
+  ihist(i, `Admitted. Charges: ${charges.join(', ')}. Sentence ${sent} days.${i.pc ? ' Protective custody: ' + i.pc + '.' : ''}`);
   return i;
 }
 function ihist(i, txt) { i.hist.unshift({ t: S.t, x: txt }); if (i.hist.length > 25) i.hist.length = 25; }
@@ -773,13 +781,14 @@ function effectiveAct(i, act, b, cov) {
   if (i.disc === 'Solitary') return act === 'Sleep' ? 'Sleep' : act === 'Meal' ? 'Meal' : act === 'Shower' && rnd() < .3 ? 'Shower' : 'Solitary';
   if (b.status === 'Lockdown' && !['Sleep', 'Meal', 'Wake'].includes(act)) return 'Lockdown';
   if (act === 'Visits' && !S.settings.visitDays[dow()]) act = 'Free';
-  if (i.disc === 'Restricted' && ['Recreation', 'Free', 'Visits'].includes(act)) return 'Lockdown';
-  if (cov < .5 && ['Recreation', 'Free', 'Visits', 'Work', 'Rehab'].includes(act)) { hourFlags.cancel = hourFlags.cancel || {}; hourFlags.cancel[b.id] = true; return 'Lockdown'; }
+  if (act === 'Yard' && S.weather === 'Storm') act = 'Recreation';
+  if (i.disc === 'Restricted' && ['Recreation', 'Yard', 'Free', 'Visits'].includes(act)) return 'Lockdown';
+  if (cov < .5 && ['Recreation', 'Yard', 'Free', 'Visits', 'Work', 'Rehab'].includes(act)) { hourFlags.cancel = hourFlags.cancel || {}; hourFlags.cancel[b.id] = true; return 'Lockdown'; }
   if (act === 'Work' && !i.job) return 'Idle';
   if (act === 'Rehab' && !i.prog) return 'Idle';
   return act;
 }
-const LOC = { Sleep: 'Cell (asleep)', Wake: 'Cell', Meal: 'Dining hall', Work: 'Work assignment', Recreation: 'Recreation yard', Rehab: 'Program room', Shower: 'Showers', Free: 'Common area', Visits: 'Visitation room', Lockdown: 'Cell (locked)', Idle: 'Cell block', Infirmary: 'Infirmary', Solitary: 'Solitary confinement' };
+const LOC = { Sleep: 'Cell (asleep)', Wake: 'Cell', Meal: 'Dining hall', Work: 'Work assignment', Recreation: 'Gym / day room', Yard: 'Exercise yard', Rehab: 'Program room', Shower: 'Showers', Free: 'Common area', Visits: 'Visitation room', Lockdown: 'Cell (locked)', Idle: 'Cell block', Infirmary: 'Infirmary', Solitary: 'Solitary confinement' };
 
 function hourTick(h) {
   hourFlags = {};
@@ -810,14 +819,16 @@ function hourTick(h) {
   // medical capacity
   let medCap = staffCount('Medical Staff', true) * 6;
 
-  let wages = 0, workshopHrs = 0;
+  let wages = 0, workshopHrs = 0, yardUsed = 0; const yardCap = (S.yards || 0) * YARD_CAP;
+  const yardGP = [], yardPC = [];
   const visitDay = S.settings.visitDays[dow()];
   const blockRivals = {};
 
   for (const i of S.inm) {
     const b = getBlock(i.blk); if (!b) continue;
     const c = cov[b.id] == null ? 1 : cov[b.id];
-    const act = effectiveAct(i, S.sched[i.cls][h], b, c);
+    let act = effectiveAct(i, S.sched[i.cls][h], b, c);
+    if (act === 'Yard') { if (yardUsed >= yardCap) { act = 'Lockdown'; hourFlags.yardFull = (hourFlags.yardFull || 0) + 1; } else { yardUsed++; (i.cls === 'Protective' ? yardPC : yardGP).push(i); } }
     i.loc = LOC[act] || act;
     const n = i.n;
     // base decay
@@ -834,7 +845,8 @@ function hourTick(h) {
         else { n.stress += 6; }
         break;
       case 'Shower': n.hygiene += 55; break;
-      case 'Recreation': n.rec += 30 + libBonus; n.social += 8; n.stress -= 4; break;
+      case 'Recreation': n.rec += 26 + libBonus; n.social += 7; n.stress -= 3; break;
+      case 'Yard': { const w = S.weather === 'Rain' ? .6 : 1; n.rec += 36 * w; n.social += 10 * w; n.stress -= 6 * w; n.health += .6 * w; if (S.weather === 'Rain') n.hygiene -= 3; if (S.weather === 'Clear') n.comfort += 1.5; break; }
       case 'Free': n.social += 14; n.rec += 9 + libBonus / 2; n.stress -= 2; break;
       case 'Work':
         n.rec += 4; n.stress -= 1.5; n.social += 3;
@@ -877,6 +889,7 @@ function hourTick(h) {
     // incidents
     if (!asleep && act !== 'Infirmary') rollIncident(i, b, c, act, blockRivals[i.id]);
   }
+  if (yardPC.length && yardGP.length) yardClash(yardPC, yardGP);
   if (wages > 0) accrue(wages, 'Inmate wages');
   if (workshopHrs > 0) { const r = workshopHrs * 11; S.money += r; T.income['Workshop contracts'] = (T.income['Workshop contracts'] || 0) + r; }
 
@@ -888,6 +901,7 @@ function hourTick(h) {
   // flags → notes (once per day per type)
   if (hourFlags.mealShort && !T.flagMeal) { T.flagMeal = true; note('bad', `Meal shortage: ${hourFlags.mealShort} inmates went without a meal. ${S.food < S.inm.length ? 'Food inventory is too low.' : 'Kitchen capacity is too low — hire kitchen workers or assign inmate kitchen jobs.'}`, true); }
   if (hourFlags.cancel) for (const bid in hourFlags.cancel) { if (!T.cancelled[bid]) { T.cancelled[bid] = true; const b = getBlock(bid); note('warn', `${b.name}: activities cancelled — fewer than half the required officers on ${shift.toLowerCase()} shift.`); incidentStaffShortage(b); } }
+  if (hourFlags.yardFull && !T.flagYard) { T.flagYard = true; note('warn', `Yard over capacity at ${String(h).padStart(2, '0')}:00: ${hourFlags.yardFull} inmates stayed in their cells. Build another exercise yard (Housing) or stagger yard times in Regimes.`); }
   if (hourFlags.progShort && !T.flagProg) { T.flagProg = true; note('warn', `Rehabilitation sessions over capacity: ${Object.keys(hourFlags.progShort).join(', ')}. Some enrolled inmates could not attend — hire more program staff.`); }
   // sample needs for daily average
   if (h % 4 === 0) { T.needSamples++; T.needAcc = T.needAcc || { hunger: 0, hygiene: 0, rec: 0, health: 0, social: 0, comfort: 0, stress: 0, safety: 0, sat: 0 }; for (const k in T.needAcc) T.needAcc[k] += k === 'sat' ? avg(S.inm, satisfaction) : avgNeed(k); }
@@ -911,10 +925,11 @@ function rollIncident(i, b, cov, act, rivalsHere) {
   p *= 1 + Math.max(0, 1 - cov) * 2.5;
   p *= 1.7 - i.beh / 100;
   p *= CLS_MULT[i.cls];
-  p *= { Recreation: 1.5, Free: 1.4, Meal: 1.25, Work: .8, Rehab: .6, Lockdown: .5, Solitary: .15, Visits: 1.1, Shower: 1.1, Idle: 1.2, Wake: .8 }[act] || 1;
+  p *= { Yard: 1.6, Recreation: 1.4, Free: 1.4, Meal: 1.25, Work: .8, Rehab: .6, Lockdown: .5, Solitary: .15, Visits: 1.1, Shower: 1.1, Idle: 1.2, Wake: .8 }[act] || 1;
   p *= 1 + rivalsHere * .3 + b.contraband / 120;
   if (i.disc === 'Solitary') p *= .3;
   if (rnd() < p) {
+    if (i.cls === 'Protective') { makeIncident(i, b, wpick([['Argument', 40], ['Refusal to follow instructions', 30], ['Property damage', 10], ['Contraband', 10]]), cov); return; }
     const type = wpick([
       ['Argument', 30], ['Refusal to follow instructions', 20 * (i.traits.includes('Rebellious') ? 2 : 1)],
       ['Fight', 13 * (i.traits.includes('Aggressive') ? 2 : 1) * (1 + rivalsHere)], ['Property damage', 9],
@@ -1098,7 +1113,7 @@ function dayTick() {
   const maintReq = Math.ceil(beds / 75); const maintOK = maintReq ? Math.min(1, staffCount('Maintenance Worker') / maintReq) : 1;
   const inmMaint = Math.min(.35, (jobFilled('Maintenance') * .05 + jobFilled('Janitorial') * .02));
   const maint = beds * 1.2 * (1 + (1 - maintOK) * 1.5) * (1 - inmMaint);
-  money(-maint, 'Maintenance', 'Facility maintenance');
+  money(-maint - (S.yards || 0) * 150, 'Maintenance', 'Facility & yard maintenance');
   const health = pop * 2 + S.inm.filter(i => i.infirm).length * 30;
   if (health) money(-health, 'Healthcare', 'Healthcare supplies & treatment');
   const secOps = staffCount('Correctional Officer') * 6;
@@ -1176,6 +1191,19 @@ function dayTick() {
     if (b.status === 'Construction') { b.buildLeft--; if (b.buildLeft <= 0) { b.status = 'Open'; note('good', `${b.name} construction complete — ${blockCap(b)} ${b.cls} beds now available.`); } }
     if (b.upgrade) { b.upgrade.left--; if (b.upgrade.left <= 0) { b.tier = b.upgrade.to; b.upgrade = null; note('good', `${b.name} upgraded to Tier ${b.tier} (${TIERS[b.tier].name}).`); } }
   });
+  // --- Weather
+  S.weather = wpick(WEATHER);
+  if (S.weather === 'Storm' && CLASSES.some(c => S.sched[c].includes('Yard'))) note('info', 'Storm forecast today: yard time moves indoors to recreation.');
+  // --- Protective custody requests
+  if (S.unlock.classes.includes('Protective')) {
+    S.inm.forEach(i => {
+      if (i.cls === 'Protective' || i.pcRequest) return;
+      const threat = i.rivals.filter(r => { const x = getInm(r); return x && x.blk === i.blk; }).length;
+      const p = (i.n.safety < 30 ? .025 : 0) + threat * .008 + (i.traits.includes('Anxious') && i.n.safety < 45 ? .006 : 0);
+      if (rnd() < p) { i.pcRequest = { d, why: pick(threat ? ['Threatened by rivals in the block', 'Debt to another inmate', 'Agreed to testify; fears retaliation'] : ['Fears for personal safety', 'Labelled an informant by other inmates', 'Left a gang and fears retaliation']) }; ihist(i, `Requested protective custody: ${i.pcRequest.why}.`); note('warn', `${iname(i)} (${i.id}) has requested protective custody: ${i.pcRequest.why}. Review it on the Security page.`); }
+    });
+    S.inm.forEach(i => { if (i.pcRequest && d - i.pcRequest.d >= 5) { i.pcRequest = null; i.n.stress = clamp(i.n.stress + 10); } });
+  }
   // --- Relationships, candidates, auto-jobs/enrol
   dailyRelationships();
   if (d % 2 === 0) S.cands = genCandidates();
@@ -1292,6 +1320,31 @@ function autoAssignOfficers(silent) {
     for (; idx < pool.length; idx++) pool[idx].assign = order.length ? order[idx % order.length].b.id : null;
   }
   if (!silent) note('info', `Officers re-assigned across ${blocks.length} blocks and two shifts.`);
+}
+
+/* ---------- Protective custody ---------- */
+function yardClash(pcList, gpList) {
+  // Protective custody inmates sharing the yard with general population are at serious risk
+  for (const v of pcList) {
+    v.n.safety = clamp(v.n.safety - 12); v.n.stress = clamp(v.n.stress + 8);
+    if (rnd() < .06) {
+      const a = pick(gpList); const b = getBlock(a.blk);
+      const dmg = ri(15, 40); v.n.health = clamp(v.n.health - dmg); rival(a, v);
+      incident(a, 'Assault on protective custody', `${iname(a)} attacked protective custody inmate ${iname(v)} (${v.pc || 'PC'}) in the exercise yard. PC and general population were scheduled in the yard at the same time.`, dmg > 30 ? 'Critical' : 'Major', b, false, [v]);
+    }
+  }
+  if (!S.today.flagPCYard) { S.today.flagPCYard = true; note('bad', 'Protective custody inmates are sharing the yard with general population. Give Protective Custody a separate yard time in Regimes.', true); }
+}
+function transferToPC(i) {
+  const spot = findBed('Protective');
+  if (!spot) return false;
+  const old = i.cls; i.cls = 'Protective'; place(i, spot.b, spot.c);
+  i.parole = i.start + Math.ceil(i.sent * PAROLE_FRAC.Protective);
+  i.pc = i.pcRequest ? i.pcRequest.why : 'Administrative placement'; i.pcRequest = null; i.gang = null;
+  i.n.safety = clamp(i.n.safety + 25); i.n.stress = clamp(i.n.stress - 15);
+  if (i.job && !jobEligible(i, i.job)) setJob(i, null);
+  ihist(i, `Transferred from ${old} to Protective Custody (${cellLabel(i)}).`);
+  return true;
 }
 /* ================= UI helpers ================= */
 const UI = { view: 'dashboard', modal: null, prof: null, profTab: 'Overview', repTab: 'Daily', dirty: false };
@@ -1413,7 +1466,7 @@ V.dashboard = () => {
   const cov = avgCoverage();
   const sat = pop ? avg(S.inm, satisfaction) : 0;
   const iss = issues();
-  let h = `<h1>Dashboard</h1><p class="sub">${esc(S.name)} · ${S.mode === 'career' ? 'Career' : 'Sandbox'} mode · ${S.pop} facility · Day ${curDay()} (${DOW[dow()]})</p>`;
+  let h = `<h1>Dashboard</h1><p class="sub">${esc(S.name)} · ${S.mode === 'career' ? 'Career' : 'Sandbox'} mode · ${S.pop} facility · Day ${curDay()} (${DOW[dow()]}) · Weather: ${S.weather || 'Clear'}</p>`;
   if (S.speed === 0 && S.t === 360) h += `<div class="alert info">The clock is paused. Press <b>1x</b> (or faster) at the top to start the simulation. First inmates arrive at 08:00.</div>`;
   h += `<div class="grid g4 mb">
     ${kpi('Population', `${pop}<span class="mut small"> / ${cap}</span>`, `${S.queue.length} pending · ${cap ? Math.round(pop / cap * 100) : 0}% occupied`)}
@@ -1431,7 +1484,7 @@ V.dashboard = () => {
   if (S.mode === 'career') h += careerCard(true);
   h += `<div class="card mb"><h3>Action items</h3>${iss.length ? iss.slice(0, 8).map(([l, m, v]) => `<div class="alert ${l}">${esc(m)} <a data-a="nav" data-arg="${v}" style="cursor:pointer">Open ${v} →</a></div>`).join('') : '<div class="alert good">Everything is running smoothly.</div>'}</div>`;
   h += `<div class="card mb"><h3>Capacity by classification</h3><div class="twrap"><table><thead><tr><th>Class</th><th class="right">Housed</th><th class="right">Beds</th><th class="right">Free</th><th class="right">Intake/day</th></tr></thead><tbody>
-    ${CLASSES.filter(c => S.unlock.classes.includes(c) || totalCapacity(c)).map(c => `<tr><td>${tag(c)} ${c}</td><td class="right mono">${S.inm.filter(i => i.cls === c).length}</td><td class="right mono">${totalCapacity(c)}</td><td class="right mono">${freeBeds(c)}</td><td class="right mono">${S.settings.intakeOn ? S.settings.intake[c] : 0}</td></tr>`).join('')}
+    ${CLASSES.filter(c => S.unlock.classes.includes(c) || totalCapacity(c)).map(c => `<tr><td>${tag(c)} ${CLS_LABEL[c]}</td><td class="right mono">${S.inm.filter(i => i.cls === c).length}</td><td class="right mono">${totalCapacity(c)}</td><td class="right mono">${freeBeds(c)}</td><td class="right mono">${S.settings.intakeOn ? S.settings.intake[c] : 0}</td></tr>`).join('')}
     </tbody></table></div></div>`;
   h += `<div class="card mb"><h3>Inmate needs</h3>${needBars(S.inm)}</div>`;
   h += `</div>`;
@@ -1506,7 +1559,7 @@ function renderProfile(i, queued) {
   const tabs = ['Overview', 'Needs', 'Work & programs', 'Account', 'Relationships', 'History'];
   const T = UI.profTab;
   let h = `<div class="spread" style="padding-right:30px"><div><h2 style="margin:0">${esc(iname(i))} <span class="mono mut">${i.id}</span></h2>
-    <div class="small mut">${tag(i.cls)} ${i.cls} · ${i.g} · Age ${i.age} · ${queued ? '<span class="warn">Pending intake</span>' : esc(cellLabel(i))} · ${esc(i.loc)}</div></div></div>`;
+    <div class="small mut">${tag(i.cls)} ${CLS_LABEL[i.cls]} · ${i.g} · Age ${i.age} · ${queued ? '<span class="warn">Pending intake</span>' : esc(cellLabel(i))} · ${esc(i.loc)}</div></div></div>`;
   h += `<div class="tabs">${tabs.map(t => `<button class="${t === T ? 'on' : ''}" data-a="ptab" data-arg="${t}">${t}</button>`).join('')}</div>`;
   if (T === 'Overview') {
     const incs = S.inc.filter(x => x.who === i.id || x.others.includes(i.id));
@@ -1519,7 +1572,7 @@ function renderProfile(i, queued) {
       <div>Remaining</div><div>${remaining(i)} days (release Day ${i.release})</div><div>Parole eligibility</div><div>Day ${i.parole}${i.hearing ? ' — <span class="warn">hearing due</span>' : ''}</div>
       <div>Parole outlook</div><div>${paroleScore(i)}/100</div></div></div>
       <div><h3>Security</h3><div class="kv">
-      <div>Classification</div><div>${tag(i.cls)} ${i.cls}</div><div>Block / cell</div><div>${esc(cellLabel(i))}</div><div>Risk</div><div>${i.risk}</div>
+      <div>Classification</div><div>${tag(i.cls)} ${CLS_LABEL[i.cls]}</div>${i.pc ? `<div>PC reason</div><div class="info">${esc(i.pc)}</div>` : ''}${i.pcRequest ? `<div>PC request</div><div class="warn">${esc(i.pcRequest.why)} (Day ${i.pcRequest.d})</div>` : ''}<div>Block / cell</div><div>${esc(cellLabel(i))}</div><div>Risk</div><div>${i.risk}</div>
       <div>Behavior score</div><div>${Math.round(i.beh)}/100</div><div>Disciplinary</div><div>${i.disc}${i.discUntil > curDay() ? ` until Day ${i.discUntil}` : ''}</div>
       <div>Incidents</div><div>${i.incCount}</div><div>Personality</div><div>${i.traits.join(', ')}</div><div>Affiliation</div><div>${i.gang || 'None known'}</div></div>`;
     if (!queued) {
@@ -1527,7 +1580,8 @@ function renderProfile(i, queued) {
       S.blocks.filter(b => b.cls === i.cls && (b.status === 'Open' || b.status === 'Lockdown')).forEach(b => b.cells.forEach(c => { if (c.occ.length < c.beds && !(b.id === i.blk && c.n === i.cell)) spots.push([b.id + ':' + c.n, `${b.name} · Cell ${c.n} (${c.occ.length}/${c.beds})`]); }));
       h += `<h3 class="mt">Actions</h3>
         <div class="field"><label class="f">Move to cell</label><div class="row">${spots.length ? sel('pMoveSel', '', [['', 'Choose a free bed…']].concat(spots.slice(0, 300))) : '<span class="small mut">No free beds in this classification.</span>'}</div></div>
-        <div class="field"><label class="f">Reclassify</label><div class="row">${sel('pReclass', i.cls, S.unlock.classes)}<span class="tiny dim">Moves to a free bed in the new classification.</span></div></div>
+        ${i.cls !== 'Protective' && S.unlock.classes.includes('Protective') ? `<div class="field"><label class="f">Protective custody</label><div class="row">${btn('Transfer to protective custody', 'pcApprove', i.id, 'sm')}<span class="tiny dim">${freeBeds('Protective')} PC beds free</span></div></div>` : ''}
+        <div class="field"><label class="f">Reclassify</label><div class="row">${sel('pReclass', i.cls, S.unlock.classes.map(c => [c, CLS_LABEL[c]]))}<span class="tiny dim">Moves to a free bed in the new classification.</span></div></div>
         <div class="field"><label class="f">Disciplinary sanction</label><div class="row">${sel('pSanctionSel', UI.pSan || 'Verbal warning', Object.keys(SANCTIONS).filter(s => s !== 'Dismiss'))}${btn('Apply', 'pSanction', i.id, 'sm')}</div></div>`;
     }
     h += `</div></div>`;
@@ -1575,7 +1629,7 @@ V.intake = () => {
   h += `<div class="grid g2 mb"><div class="card"><h3>Daily intake allowance</h3>
     <div class="field">${chk('intakeOn', S.settings.intakeOn, 'Automatic intake enabled')}</div>
     <div class="twrap"><table><thead><tr><th>Classification</th><th class="right">Per day</th><th class="right">Free beds</th></tr></thead><tbody>
-    ${cls.map(c => `<tr><td>${tag(c)} ${c}</td><td class="right">${num('intakeN', S.settings.intake[c], c, 0, 100)}</td><td class="right mono">${freeBeds(c)}</td></tr>`).join('')}
+    ${cls.map(c => `<tr><td>${tag(c)} ${CLS_LABEL[c]}</td><td class="right">${num('intakeN', S.settings.intake[c], c, 0, 100)}</td><td class="right mono">${freeBeds(c)}</td></tr>`).join('')}
     </tbody></table></div>
     <div class="field mt"><label class="f">When no suitable bed is available</label>${seg('overflow', S.settings.overflow, [['queue', 'Hold in pending queue'], ['reject', 'Redirect to other facilities']])}</div>
     <div class="row small mut">Queue limit ${num('queueMax', S.settings.queueMax, '', 0, 500, 1, 70)} · transfer after ${num('queueDays', S.settings.queueDays, '', 1, 30, 1, 60)} days waiting</div>
@@ -1607,7 +1661,7 @@ C.queueDays = v => { S.settings.queueDays = clamp(parseInt(v) || 1, 1, 30); dirt
 V.housing = () => {
   const cls = S.unlock.classes;
   let h = `<h1>Housing</h1><p class="sub">Capacity is the number of approved, usable beds. Total: ${totalCapacity()} beds, ${S.inm.length} occupied.</p>`;
-  h += `<div class="grid g4 mb">${CLASSES.filter(c => cls.includes(c) || totalCapacity(c)).map(c => kpi(`${c}`, `${S.inm.filter(i => i.cls === c).length}<span class="mut small"> / ${totalCapacity(c)}</span>`, `${freeBeds(c)} free beds`)).join('')}</div>`;
+  h += `<div class="grid g4 mb">${CLASSES.filter(c => cls.includes(c) || totalCapacity(c)).map(c => kpi(CLS_LABEL[c], `${S.inm.filter(i => i.cls === c).length}<span class="mut small"> / ${totalCapacity(c)}</span>`, `${freeBeds(c)} free beds`)).join('')}</div>`;
   h += `<div class="blocks mb">`;
   for (const b of S.blocks) {
     const cap = blockCap(b), occ = blockOcc(b);
@@ -1625,11 +1679,13 @@ V.housing = () => {
       ${btn('Rename', 'renameBlock', b.id, 'sm')}${b.status !== 'Construction' ? btn(b.status === 'Closed' ? 'Reopen' : 'Close', 'closeBlock', b.id, 'sm') : ''}</div></div>`;
   }
   h += `</div>`;
+  h += `<div class="card mb"><div class="spread"><div><h3 style="margin:0">Exercise yards</h3><div class="small mut mt6">${S.yards} yard${S.yards === 1 ? '' : 's'} · ${S.yards * YARD_CAP} inmates at once · weather today: ${S.weather}</div></div>${btn(`Build yard (${fmt$(YARD_COST)})`, 'buildYard', null, 'pri')}</div>
+    <div class="small mt6">Peak yard use: ${(() => { let m = 0, at = 0; for (let hr = 0; hr < 24; hr++) { const u = S.inm.filter(i => S.sched[i.cls][hr] === 'Yard').length; if (u > m) { m = u; at = hr; } } return m ? `${m} inmates at ${String(at).padStart(2, '0')}:00` : 'no yard time scheduled'; })()}. Yards cost $150/day each to maintain.</div></div>`;
   const f = UI.build = UI.build || { name: nextBlockName(), cls: cls[0], tier: 1, cells: 20, beds: BEDS_PER_CELL[cls[0]] };
   if (!cls.includes(f.cls)) f.cls = cls[0];
   h += `<div class="card"><h3>Build a new cell block</h3><div class="grid g4">
     <div class="field"><label class="f">Name</label><input type="text" data-c="bName" value="${esc(f.name)}" style="width:100%"></div>
-    <div class="field"><label class="f">Classification</label>${sel('bCls', f.cls, cls)}</div>
+    <div class="field"><label class="f">Classification</label>${sel('bCls', f.cls, cls.map(c => [c, CLS_LABEL[c]]))}</div>
     <div class="field"><label class="f">Cell tier</label>${sel('bTier', f.tier, [[1, 'Tier 1 – Basic'], [2, 'Tier 2 – Standard']].concat(S.unlock.tier3 ? [[3, 'Tier 3 – Premium']] : []))}</div>
     <div class="field"><label class="f">Cells × beds per cell</label><div class="row" style="flex-wrap:nowrap">${num('bCells', f.cells, '', 1, 200, 1, 70)} × ${sel('bBeds', f.beds, [[1, '1'], [2, '2'], [4, '4 (dorm)']])}</div></div></div>
     <div class="spread"><div class="small mut" id="buildInfo">${buildInfo()}</div>${btn('Build block', 'build', null, 'pri')}</div>
@@ -1656,6 +1712,7 @@ A.build = () => {
     S.stats.blocksBuilt++; note('info', `Construction started on ${f.name}.`); UI.build = null; dirty(); render();
   });
 };
+A.buildYard = () => { if (S.money < YARD_COST) return toast('bad', `Not enough funds: ${fmt$(YARD_COST)} needed.`); confirmBox('Build exercise yard', `Build another outdoor exercise yard for ${fmt$(YARD_COST)}? It adds room for ${YARD_CAP} inmates at a time.`, 'Build', () => { money(-YARD_COST, 'Construction', 'Exercise yard'); S.yards++; note('good', `New exercise yard opened. Yard capacity is now ${S.yards * YARD_CAP}.`); dirty(); render(); }); };
 A.lockdown = id => { const b = getBlock(id); b.status = b.status === 'Lockdown' ? 'Open' : 'Lockdown'; note(b.status === 'Lockdown' ? 'warn' : 'info', `${b.name}: lockdown ${b.status === 'Lockdown' ? 'imposed' : 'lifted'}.`); if (b.status === 'Lockdown') { b.contraband = clamp(b.contraband - 10); b.incidents = Math.max(0, b.incidents - 2); } dirty(); render(); };
 A.upgrade = id => { const b = getBlock(id); const c = upgradeCost(b); if (c > S.money) return toast('bad', `Not enough funds: ${fmt$(c)} needed.`); confirmBox('Upgrade cells', `Upgrade all ${b.cells.length} cells in ${esc(b.name)} to Tier ${b.tier + 1} (${TIERS[b.tier + 1].name}) for ${fmt$(c)}? Utilities rise to ${fmt$(blockCap(b) * TIERS[b.tier + 1].util)}/day. Takes 1 day.`, 'Upgrade', () => { money(-c, 'Construction', `Upgrade ${b.name} to Tier ${b.tier + 1}`); b.upgrade = { to: b.tier + 1, left: 1 }; dirty(); render(); }); };
 A.renameBlock = id => { const b = getBlock(id); UI._rn = id; openModal(`<h2>Rename block</h2><input type="text" id="rnIn" value="${esc(b.name)}" style="width:100%"><div class="row mt" style="justify-content:flex-end">${btn('Cancel', 'closeModal')}${btn('Save', 'renameOk', null, 'pri')}</div>`, true); };
@@ -1677,6 +1734,10 @@ V.security = () => {
     ${open.map(x => `<tr><td class="mono small">${x.id}</td><td class="small">${stamp(x.t)}</td><td>${sevTag(x.sev)}</td><td>${x.type}</td><td>${x.who ? inmLink(x.who, x.whoName) : '—'}</td><td style="white-space:normal;min-width:220px" class="small">${esc(x.desc)}</td>
     <td><div class="row" style="flex-wrap:nowrap">${sel('incSel', UI['inc_' + x.id] || standardSanction(x), Object.keys(SANCTIONS), x.id)}${btn('Apply', 'incApply', x.id, 'sm pri')}</div></td></tr>`).join('')}</tbody></table></div>
     <div class="row mt">${btn('Apply standard sanctions to all', 'incAll', null, 'sm')}<span class="tiny dim">${Object.entries(SANCTIONS).map(([k, v]) => `${k}: ${v.d}`).join(' · ')}</span></div>` : '<div class="alert good">No incidents awaiting action.</div>'}</div>`;
+  const pcr = S.inm.filter(i => i.pcRequest);
+  if (pcr.length) h += `<div class="card mb"><h3>Protective custody requests (${pcr.length})</h3><div class="twrap"><table><thead><tr><th>Inmate</th><th>Class</th><th>Reason</th><th class="right">Safety</th><th class="right">Rivals in block</th><th>Requested</th><th></th></tr></thead><tbody>
+    ${pcr.map(i => `<tr><td>${inmLink(i.id, iname(i))} <span class="mono tiny dim">${i.id}</span></td><td>${tag(i.cls)}</td><td style="white-space:normal">${esc(i.pcRequest.why)}</td><td class="right mono">${Math.round(i.n.safety)}</td><td class="right mono">${i.rivals.filter(r => { const x = getInm(r); return x && x.blk === i.blk; }).length}</td><td>Day ${i.pcRequest.d}</td><td><div class="row" style="flex-wrap:nowrap">${btn('Approve transfer', 'pcApprove', i.id, 'sm pri')}${btn('Deny', 'pcDeny', i.id, 'sm')}</div></td></tr>`).join('')}</tbody></table></div>
+    <p class="tiny dim mt6">${freeBeds('Protective')} protective custody beds free. Unanswered requests expire after 5 days, and the inmate's stress rises.</p></div>`;
   h += `<div class="grid g2 mb"><div class="card"><h3>Security policies</h3>
     <div class="field"><label class="f">Automatic handling with standard sanctions</label>${seg('autoHandle', S.settings.autoHandle, [['minor', 'Minor only'], ['moderate', 'Minor + moderate'], ['all', 'All incidents']])}</div>
     <div class="field"><label class="f">Cell searches (cost per inmate per search: $2 daily / $4 weekly)</label>${seg('searches', S.settings.searches, [['off', 'Off'], ['weekly', 'Weekly (Mon)'], ['daily', 'Daily']])}</div>
@@ -1695,10 +1756,12 @@ V.security = () => {
     { l: 'Details', v: x => x.desc, h: x => `<span class="small" style="white-space:normal;display:inline-block;min-width:240px">${esc(x.desc)}</span>` }, { l: 'Outcome', v: x => x.action || 'Open' }
   ], { sort: 1, dir: -1, per: 15, empty: 'No incidents recorded yet.', filters: [
     { l: 'Severity', opts: ['Minor', 'Moderate', 'Major', 'Critical', 'Positive'], fn: (x, v) => x.sev === v },
-    { l: 'Type', opts: ['Argument', 'Refusal to follow instructions', 'Fight', 'Property damage', 'Contraband', 'Assault on staff', 'Attempted escape', 'Escape', 'Medical emergency', 'Staff shortage', 'Positive behavior', 'Administrative sanction'], fn: (x, v) => x.type === v },
+    { l: 'Type', opts: ['Argument', 'Refusal to follow instructions', 'Fight', 'Property damage', 'Contraband', 'Assault on staff', 'Attempted escape', 'Escape', 'Assault on protective custody', 'Medical emergency', 'Staff shortage', 'Positive behavior', 'Administrative sanction'], fn: (x, v) => x.type === v },
     { l: 'Status', opts: ['Open', 'Closed', 'Recorded'], fn: (x, v) => x.status === v }] })}</div>`;
   return h;
 };
+A.pcApprove = id => { const i = getInm(id); if (!i) return; if (!S.unlock.classes.includes('Protective')) return toast('bad', 'Protective Custody is not unlocked yet.'); if (!transferToPC(i)) return toast('bad', 'No free Protective Custody beds. Build a PC unit in Housing.'); toast('good', `${iname(i)} moved to protective custody.`); dirty(); if (UI.prof) openInmate(id); else render(); };
+A.pcDeny = id => { const i = getInm(id); if (!i) return; i.pcRequest = null; i.n.stress = clamp(i.n.stress + 8); ihist(i, 'Protective custody request denied.'); dirty(); render(); };
 C.incSel = (v, el, id) => { UI['inc_' + id] = v; };
 A.incApply = id => { const x = S.inc.find(x => x.id === id); if (!x || x.status !== 'Open') return; const s = UI['inc_' + id] || standardSanction(x); applySanction(x, s); dirty(); toast('info', `${x.id}: ${s}.`); render(); };
 A.incAll = () => { S.inc.filter(x => x.status === 'Open').forEach(x => applySanction(x, standardSanction(x))); dirty(); render(); };
@@ -1758,13 +1821,14 @@ C.stAssign = (v, el, id) => { const s = S.staff.find(x => x.id === id); if (s) {
 /* ---------- Regimes ---------- */
 V.regimes = () => {
   const cls = S.unlock.classes;
-  let h = `<h1>Regimes</h1><p class="sub">Daily schedules by security classification, hour by hour. Activities run only when staffing allows: below 50% officer coverage, out-of-cell activities are cancelled.</p>`;
+  let h = `<h1>Regimes</h1><p class="sub">Daily schedules by security classification, hour by hour. Activities run only when staffing allows: below 50% officer coverage, out-of-cell activities are cancelled.</p>
+    <div class="alert info">Yard: ${S.yards} exercise yard${S.yards === 1 ? '' : 's'} holding ${S.yards * YARD_CAP} inmates at once. Today's weather: <b>${S.weather}</b> (rain reduces yard benefits; storms move yard time indoors). Keep Protective Custody's yard time separate from everyone else. ${btn('Manage yards', 'nav', 'housing', 'sm')}</div>`;
   h += `<div class="row mb">${btn('Reset all to default', 'schedReset', null, 'sm')}${sel('schedCopyFrom', UI.copyFrom || cls[0], cls)}${btn('Copy to all classifications', 'schedCopy', null, 'sm')}
     <span class="tiny dim">Legend: ${ACT_NAMES.map(a => `<span class="dot" style="background:${ACTS[a].c}"></span>${ACTS[a].l}`).join(' &nbsp; ')}</span></div>`;
   h += `<div class="sched">`;
   for (const c of cls) {
     const s = S.sched[c]; const w = schedWarnings(c);
-    h += `<div class="col"><div class="spread mb"><b>${tag(c)} ${c}</b><span class="tiny mut">${S.inm.filter(i => i.cls === c).length} inmates</span></div>
+    h += `<div class="col"><div class="spread mb"><b>${tag(c)} ${CLS_LABEL[c]}</b><span class="tiny mut">${S.inm.filter(i => i.cls === c).length} inmates</span></div>
       ${s.map((a, hr) => `<div class="srow"><span class="mono small mut">${String(hr).padStart(2, '0')}:00</span><select data-c="sched" data-arg="${c}|${hr}" style="border-left-color:${ACTS[a].c}">${ACT_NAMES.map(x => `<option value="${x}"${x === a ? ' selected' : ''}>${ACTS[x].l}</option>`).join('')}</select></div>`).join('')}
       <div class="mt6">${w.map(x => `<div class="alert ${x[0]}" style="font-size:12px">${x[1]}</div>`).join('') || '<div class="alert good" style="font-size:12px">Schedule checks passed.</div>'}</div></div>`;
   }
@@ -1777,7 +1841,9 @@ function schedWarnings(c) {
   if (n('Meal') > 4) out.push(['warn', `${n('Meal')} meal periods will raise food costs.`]);
   if (n('Sleep') < 6) out.push(['warn', `Only ${n('Sleep')} hours of sleep — stress will rise.`]);
   if (!n('Shower')) out.push(['warn', 'No shower period: hygiene will fall.']);
-  if (!n('Recreation') && !n('Free')) out.push(['warn', 'No recreation or free time: recreation and social needs will collapse.']);
+  if (!n('Recreation') && !n('Free') && !n('Yard')) out.push(['warn', 'No yard, recreation or free time: recreation and social needs will collapse.']);
+  if (!n('Yard')) out.push(['info', 'No yard time: inmates never go outdoors. Yard is the best activity for recreation and stress.']);
+  s.forEach((a, hr) => { if (a !== 'Yard') return; const using = S.inm.filter(i => S.sched[i.cls][hr] === 'Yard').length; const cap = (S.yards || 0) * YARD_CAP; if (using > cap) out.push(['bad', `${String(hr).padStart(2, '0')}:00 yard: ${using} inmates scheduled, capacity ${cap}. Stagger times or build another yard.`]); if (c === 'Protective' && CLASSES.some(k => k !== 'Protective' && S.sched[k][hr] === 'Yard' && S.inm.some(i => i.cls === k))) out.push(['bad', `${String(hr).padStart(2, '0')}:00: Protective Custody shares the yard with general population — PC inmates will be attacked.`]); if (c !== 'Protective' && S.sched.Protective[hr] === 'Yard' && S.inm.some(i => i.cls === 'Protective') && pop) out.push(['bad', `${String(hr).padStart(2, '0')}:00: yard time overlaps with Protective Custody.`]); });
   if (n('Work')) { const posts = sum(JOB_NAMES.filter(j => S.unlock.jobs[j] && S.jobs[j].on && S.jobs[j].elig.includes(c)), j => S.jobs[j].pos); if (!posts) out.push(['warn', `Employment hours scheduled but no jobs accept ${c} inmates.`]); }
   if (n('Rehab')) { const progs = PROG_NAMES.filter(p => S.unlock.progs[p] && S.progs[p].on && S.progs[p].elig.includes(c)); const seats = sum(progs, progSeats); if (!seats) out.push(['warn', 'Rehabilitation hours scheduled but no program staff are available.']); else { const enr = S.inm.filter(i => i.prog && progs.includes(i.prog)).length; if (enr > seats) out.push(['info', `Program rooms: ${seats} seats/hour shared across classifications, ${enr} enrolled.`]); } }
   if (n('Visits') && !S.settings.visitDays.some(Boolean)) out.push(['info', 'Visitation scheduled but no visiting days are set (Visitors page).']);
@@ -2196,6 +2262,7 @@ function renderShell() {
     <div class="speeds" id="spd">${SPEEDS.map(v => `<button data-a="speed" data-arg="${v}">${v ? v + 'x' : '❚❚'}</button>`).join('')}</div>
     <div class="hstat hide-m"><span>Balance</span><b id="hBal"></b></div>
     <div class="hstat hide-m"><span>Pop</span><b id="hPop"></b></div>
+    <div class="hstat" title="Employees present today / total employed"><span>Staff</span><b id="hStaff"></b></div>
     <div class="grow"></div>
     <span class="tiny dim hide-m" id="saveDot"></span>
     <button class="hbtn" data-a="nav" data-arg="dashboard" title="Notifications">🔔<span class="badge hide" id="hBadge"></span></button>
@@ -2211,6 +2278,7 @@ function updateHeader() {
   $('#clk').innerHTML = `Day <b>${curDay()}</b> ${DOW[dow()]} <b>${clockStr()}</b>`;
   $('#hBal').textContent = fmt$(S.money); $('#hBal').className = S.money < 0 ? 'bad' : '';
   $('#hPop').textContent = `${S.inm.length}/${totalCapacity()}`;
+  const pres = S.staff.filter(s => s.present).length; $('#hStaff').textContent = pres === S.staff.length ? S.staff.length : `${pres}/${S.staff.length}`;
   document.querySelectorAll('#spd button').forEach(b => b.classList.toggle('on', +b.dataset.arg === S.speed));
   const unread = S.notes.filter(n => !n.read && (n.lvl === 'bad' || n.lvl === 'warn')).length;
   const bd = $('#hBadge'); bd.textContent = unread; bd.classList.toggle('hide', !unread);
@@ -2293,7 +2361,7 @@ function renderMenu() {
     <div class="field"><label class="f">Game mode</label><div class="choice" style="grid-template-columns:1fr 1fr">${cbtn('mode', 'sandbox', 'Sandbox', 'Full freedom: choose size, funds and classifications. Everything unlocked.')}${cbtn('mode', 'career', 'Career', 'Start with a small Minimum/Medium prison and unlock facilities through objectives.')}</div></div>
     ${career ? '<div class="alert info">Career starts as a Small prison (50 beds, Minimum + Medium) with $150,000.</div>' : `
     <div class="field"><label class="f">Prison size</label><div class="choice">${cbtn('size', 'Small', 'Small', '50 beds')}${cbtn('size', 'Medium', 'Medium', '150 beds')}${cbtn('size', 'Large', 'Large', '300 beds')}</div></div>
-    <div class="field"><label class="f">Security classifications</label>${CLASSES.map(c => `<label class="chk"><input type="checkbox" data-c="ngCls" data-arg="${c}"${g.classes.includes(c) ? ' checked' : ''}> ${c}</label>`).join('')}</div>
+    <div class="field"><label class="f">Security classifications</label>${CLASSES.map(c => `<label class="chk"><input type="checkbox" data-c="ngCls" data-arg="${c}"${g.classes.includes(c) ? ' checked' : ''}> ${CLS_LABEL[c]}</label>`).join('')}</div>
     <div class="field"><label class="f">Starting funds</label>${seg('ng_funds', g.funds, [['250000', '$250k'], ['500000', '$500k'], ['1000000', '$1M'], ['5000000', '$5M']])}</div>`}
     <div class="grid g3"><div class="field"><label class="f">Population</label>${seg('ng_pop', g.pop, [['Male', 'Male'], ['Female', 'Female']])}</div>
     <div class="field"><label class="f">Starting employees</label>${seg('ng_staff', g.staff, [['recommended', 'Recommended'], ['minimal', 'Minimal'], ['none', 'None']])}</div>
@@ -2309,8 +2377,8 @@ A.startGame = async () => {
   const g = UI.ng; const career = g.mode === 'career';
   const size = career ? 'Small' : g.size;
   const mult = { low: .6, normal: 1, high: 1.6 }[g.intake];
-  const base = { Small: { Minimum: 3, Medium: 4, Maximum: 2, Supermax: 1 }, Medium: { Minimum: 3, Medium: 5, Maximum: 3, Supermax: 1 }, Large: { Minimum: 6, Medium: 8, Maximum: 5, Supermax: 2 } }[size];
-  const intake = {}; CLASSES.forEach(c => intake[c] = Math.max(c === 'Supermax' ? 0 : 1, Math.round(base[c] * mult)));
+  const base = { Small: { Minimum: 3, Medium: 4, Maximum: 2, Supermax: 1, Protective: 1 }, Medium: { Minimum: 3, Medium: 5, Maximum: 2, Supermax: 1, Protective: 1 }, Large: { Minimum: 6, Medium: 8, Maximum: 4, Supermax: 2, Protective: 1 } }[size];
+  const intake = {}; CLASSES.forEach(c => intake[c] = Math.max(c === 'Supermax' || c === 'Protective' ? 0 : 1, Math.round(base[c] * mult)));
   const cfg = { name: (g.name || 'New Prison').trim().slice(0, 40), mode: g.mode, size, pop: g.pop, funds: career ? 150000 : +g.funds, staff: g.staff, classes: career ? null : CLASSES.filter(c => g.classes.includes(c)), intake, overflow: g.overflow };
   newState(cfg);
   UI.view = 'dashboard'; UI.build = null; for (const k in TS) delete TS[k];
@@ -2332,6 +2400,11 @@ function migrate(st) {
   // forward-compatible defaults for older saves
   st.settings = Object.assign({ intakeOn: true, overflow: 'queue', queueMax: 40, queueDays: 5, autoReorder: true, reorderDays: 5, autoHandle: 'moderate', searches: 'weekly', screening: 'standard', autoJobs: true, autoEnroll: true, paroleMode: 'review' }, st.settings);
   st.today = st.today || blankDay(); st.inspections = st.inspections || []; st.reports = st.reports || [];
+  if (!st.sched.Protective) st.sched.Protective = defaultSchedule('Protective');
+  ['intake', 'funding'].forEach(k => { if (st.settings[k].Protective == null) st.settings[k].Protective = k === 'intake' ? 0 : DEFAULT_FUNDING.Protective; });
+  if (st.yards == null) { st.yards = Math.max(1, Math.ceil(sum(st.blocks, b => sum(b.cells, c => c.beds)) / 150)); CLASSES.forEach(c => { const s = st.sched[c]; const k = s.indexOf('Recreation'); if (k >= 0 && !s.includes('Yard')) s[k] = 'Yard'; }); }
+  if (!st.weather) st.weather = 'Clear';
+  if (st.mode !== 'career' && !st.unlock.classes.includes('Protective')) st.unlock.classes.push('Protective');
 }
 
 /* ================= Boot ================= */

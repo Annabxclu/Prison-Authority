@@ -118,7 +118,7 @@ V.dashboard = () => {
   const cov = avgCoverage();
   const sat = pop ? avg(S.inm, satisfaction) : 0;
   const iss = issues();
-  let h = `<h1>Dashboard</h1><p class="sub">${esc(S.name)} · ${S.mode === 'career' ? 'Career' : 'Sandbox'} mode · ${S.pop} facility · Day ${curDay()} (${DOW[dow()]})</p>`;
+  let h = `<h1>Dashboard</h1><p class="sub">${esc(S.name)} · ${S.mode === 'career' ? 'Career' : 'Sandbox'} mode · ${S.pop} facility · Day ${curDay()} (${DOW[dow()]}) · Weather: ${S.weather || 'Clear'}</p>`;
   if (S.speed === 0 && S.t === 360) h += `<div class="alert info">The clock is paused. Press <b>1x</b> (or faster) at the top to start the simulation. First inmates arrive at 08:00.</div>`;
   h += `<div class="grid g4 mb">
     ${kpi('Population', `${pop}<span class="mut small"> / ${cap}</span>`, `${S.queue.length} pending · ${cap ? Math.round(pop / cap * 100) : 0}% occupied`)}
@@ -136,7 +136,7 @@ V.dashboard = () => {
   if (S.mode === 'career') h += careerCard(true);
   h += `<div class="card mb"><h3>Action items</h3>${iss.length ? iss.slice(0, 8).map(([l, m, v]) => `<div class="alert ${l}">${esc(m)} <a data-a="nav" data-arg="${v}" style="cursor:pointer">Open ${v} →</a></div>`).join('') : '<div class="alert good">Everything is running smoothly.</div>'}</div>`;
   h += `<div class="card mb"><h3>Capacity by classification</h3><div class="twrap"><table><thead><tr><th>Class</th><th class="right">Housed</th><th class="right">Beds</th><th class="right">Free</th><th class="right">Intake/day</th></tr></thead><tbody>
-    ${CLASSES.filter(c => S.unlock.classes.includes(c) || totalCapacity(c)).map(c => `<tr><td>${tag(c)} ${c}</td><td class="right mono">${S.inm.filter(i => i.cls === c).length}</td><td class="right mono">${totalCapacity(c)}</td><td class="right mono">${freeBeds(c)}</td><td class="right mono">${S.settings.intakeOn ? S.settings.intake[c] : 0}</td></tr>`).join('')}
+    ${CLASSES.filter(c => S.unlock.classes.includes(c) || totalCapacity(c)).map(c => `<tr><td>${tag(c)} ${CLS_LABEL[c]}</td><td class="right mono">${S.inm.filter(i => i.cls === c).length}</td><td class="right mono">${totalCapacity(c)}</td><td class="right mono">${freeBeds(c)}</td><td class="right mono">${S.settings.intakeOn ? S.settings.intake[c] : 0}</td></tr>`).join('')}
     </tbody></table></div></div>`;
   h += `<div class="card mb"><h3>Inmate needs</h3>${needBars(S.inm)}</div>`;
   h += `</div>`;
@@ -211,7 +211,7 @@ function renderProfile(i, queued) {
   const tabs = ['Overview', 'Needs', 'Work & programs', 'Account', 'Relationships', 'History'];
   const T = UI.profTab;
   let h = `<div class="spread" style="padding-right:30px"><div><h2 style="margin:0">${esc(iname(i))} <span class="mono mut">${i.id}</span></h2>
-    <div class="small mut">${tag(i.cls)} ${i.cls} · ${i.g} · Age ${i.age} · ${queued ? '<span class="warn">Pending intake</span>' : esc(cellLabel(i))} · ${esc(i.loc)}</div></div></div>`;
+    <div class="small mut">${tag(i.cls)} ${CLS_LABEL[i.cls]} · ${i.g} · Age ${i.age} · ${queued ? '<span class="warn">Pending intake</span>' : esc(cellLabel(i))} · ${esc(i.loc)}</div></div></div>`;
   h += `<div class="tabs">${tabs.map(t => `<button class="${t === T ? 'on' : ''}" data-a="ptab" data-arg="${t}">${t}</button>`).join('')}</div>`;
   if (T === 'Overview') {
     const incs = S.inc.filter(x => x.who === i.id || x.others.includes(i.id));
@@ -224,7 +224,7 @@ function renderProfile(i, queued) {
       <div>Remaining</div><div>${remaining(i)} days (release Day ${i.release})</div><div>Parole eligibility</div><div>Day ${i.parole}${i.hearing ? ' — <span class="warn">hearing due</span>' : ''}</div>
       <div>Parole outlook</div><div>${paroleScore(i)}/100</div></div></div>
       <div><h3>Security</h3><div class="kv">
-      <div>Classification</div><div>${tag(i.cls)} ${i.cls}</div><div>Block / cell</div><div>${esc(cellLabel(i))}</div><div>Risk</div><div>${i.risk}</div>
+      <div>Classification</div><div>${tag(i.cls)} ${CLS_LABEL[i.cls]}</div>${i.pc ? `<div>PC reason</div><div class="info">${esc(i.pc)}</div>` : ''}${i.pcRequest ? `<div>PC request</div><div class="warn">${esc(i.pcRequest.why)} (Day ${i.pcRequest.d})</div>` : ''}<div>Block / cell</div><div>${esc(cellLabel(i))}</div><div>Risk</div><div>${i.risk}</div>
       <div>Behavior score</div><div>${Math.round(i.beh)}/100</div><div>Disciplinary</div><div>${i.disc}${i.discUntil > curDay() ? ` until Day ${i.discUntil}` : ''}</div>
       <div>Incidents</div><div>${i.incCount}</div><div>Personality</div><div>${i.traits.join(', ')}</div><div>Affiliation</div><div>${i.gang || 'None known'}</div></div>`;
     if (!queued) {
@@ -232,7 +232,8 @@ function renderProfile(i, queued) {
       S.blocks.filter(b => b.cls === i.cls && (b.status === 'Open' || b.status === 'Lockdown')).forEach(b => b.cells.forEach(c => { if (c.occ.length < c.beds && !(b.id === i.blk && c.n === i.cell)) spots.push([b.id + ':' + c.n, `${b.name} · Cell ${c.n} (${c.occ.length}/${c.beds})`]); }));
       h += `<h3 class="mt">Actions</h3>
         <div class="field"><label class="f">Move to cell</label><div class="row">${spots.length ? sel('pMoveSel', '', [['', 'Choose a free bed…']].concat(spots.slice(0, 300))) : '<span class="small mut">No free beds in this classification.</span>'}</div></div>
-        <div class="field"><label class="f">Reclassify</label><div class="row">${sel('pReclass', i.cls, S.unlock.classes)}<span class="tiny dim">Moves to a free bed in the new classification.</span></div></div>
+        ${i.cls !== 'Protective' && S.unlock.classes.includes('Protective') ? `<div class="field"><label class="f">Protective custody</label><div class="row">${btn('Transfer to protective custody', 'pcApprove', i.id, 'sm')}<span class="tiny dim">${freeBeds('Protective')} PC beds free</span></div></div>` : ''}
+        <div class="field"><label class="f">Reclassify</label><div class="row">${sel('pReclass', i.cls, S.unlock.classes.map(c => [c, CLS_LABEL[c]]))}<span class="tiny dim">Moves to a free bed in the new classification.</span></div></div>
         <div class="field"><label class="f">Disciplinary sanction</label><div class="row">${sel('pSanctionSel', UI.pSan || 'Verbal warning', Object.keys(SANCTIONS).filter(s => s !== 'Dismiss'))}${btn('Apply', 'pSanction', i.id, 'sm')}</div></div>`;
     }
     h += `</div></div>`;
@@ -280,7 +281,7 @@ V.intake = () => {
   h += `<div class="grid g2 mb"><div class="card"><h3>Daily intake allowance</h3>
     <div class="field">${chk('intakeOn', S.settings.intakeOn, 'Automatic intake enabled')}</div>
     <div class="twrap"><table><thead><tr><th>Classification</th><th class="right">Per day</th><th class="right">Free beds</th></tr></thead><tbody>
-    ${cls.map(c => `<tr><td>${tag(c)} ${c}</td><td class="right">${num('intakeN', S.settings.intake[c], c, 0, 100)}</td><td class="right mono">${freeBeds(c)}</td></tr>`).join('')}
+    ${cls.map(c => `<tr><td>${tag(c)} ${CLS_LABEL[c]}</td><td class="right">${num('intakeN', S.settings.intake[c], c, 0, 100)}</td><td class="right mono">${freeBeds(c)}</td></tr>`).join('')}
     </tbody></table></div>
     <div class="field mt"><label class="f">When no suitable bed is available</label>${seg('overflow', S.settings.overflow, [['queue', 'Hold in pending queue'], ['reject', 'Redirect to other facilities']])}</div>
     <div class="row small mut">Queue limit ${num('queueMax', S.settings.queueMax, '', 0, 500, 1, 70)} · transfer after ${num('queueDays', S.settings.queueDays, '', 1, 30, 1, 60)} days waiting</div>
@@ -312,7 +313,7 @@ C.queueDays = v => { S.settings.queueDays = clamp(parseInt(v) || 1, 1, 30); dirt
 V.housing = () => {
   const cls = S.unlock.classes;
   let h = `<h1>Housing</h1><p class="sub">Capacity is the number of approved, usable beds. Total: ${totalCapacity()} beds, ${S.inm.length} occupied.</p>`;
-  h += `<div class="grid g4 mb">${CLASSES.filter(c => cls.includes(c) || totalCapacity(c)).map(c => kpi(`${c}`, `${S.inm.filter(i => i.cls === c).length}<span class="mut small"> / ${totalCapacity(c)}</span>`, `${freeBeds(c)} free beds`)).join('')}</div>`;
+  h += `<div class="grid g4 mb">${CLASSES.filter(c => cls.includes(c) || totalCapacity(c)).map(c => kpi(CLS_LABEL[c], `${S.inm.filter(i => i.cls === c).length}<span class="mut small"> / ${totalCapacity(c)}</span>`, `${freeBeds(c)} free beds`)).join('')}</div>`;
   h += `<div class="blocks mb">`;
   for (const b of S.blocks) {
     const cap = blockCap(b), occ = blockOcc(b);
@@ -330,11 +331,13 @@ V.housing = () => {
       ${btn('Rename', 'renameBlock', b.id, 'sm')}${b.status !== 'Construction' ? btn(b.status === 'Closed' ? 'Reopen' : 'Close', 'closeBlock', b.id, 'sm') : ''}</div></div>`;
   }
   h += `</div>`;
+  h += `<div class="card mb"><div class="spread"><div><h3 style="margin:0">Exercise yards</h3><div class="small mut mt6">${S.yards} yard${S.yards === 1 ? '' : 's'} · ${S.yards * YARD_CAP} inmates at once · weather today: ${S.weather}</div></div>${btn(`Build yard (${fmt$(YARD_COST)})`, 'buildYard', null, 'pri')}</div>
+    <div class="small mt6">Peak yard use: ${(() => { let m = 0, at = 0; for (let hr = 0; hr < 24; hr++) { const u = S.inm.filter(i => S.sched[i.cls][hr] === 'Yard').length; if (u > m) { m = u; at = hr; } } return m ? `${m} inmates at ${String(at).padStart(2, '0')}:00` : 'no yard time scheduled'; })()}. Yards cost $150/day each to maintain.</div></div>`;
   const f = UI.build = UI.build || { name: nextBlockName(), cls: cls[0], tier: 1, cells: 20, beds: BEDS_PER_CELL[cls[0]] };
   if (!cls.includes(f.cls)) f.cls = cls[0];
   h += `<div class="card"><h3>Build a new cell block</h3><div class="grid g4">
     <div class="field"><label class="f">Name</label><input type="text" data-c="bName" value="${esc(f.name)}" style="width:100%"></div>
-    <div class="field"><label class="f">Classification</label>${sel('bCls', f.cls, cls)}</div>
+    <div class="field"><label class="f">Classification</label>${sel('bCls', f.cls, cls.map(c => [c, CLS_LABEL[c]]))}</div>
     <div class="field"><label class="f">Cell tier</label>${sel('bTier', f.tier, [[1, 'Tier 1 – Basic'], [2, 'Tier 2 – Standard']].concat(S.unlock.tier3 ? [[3, 'Tier 3 – Premium']] : []))}</div>
     <div class="field"><label class="f">Cells × beds per cell</label><div class="row" style="flex-wrap:nowrap">${num('bCells', f.cells, '', 1, 200, 1, 70)} × ${sel('bBeds', f.beds, [[1, '1'], [2, '2'], [4, '4 (dorm)']])}</div></div></div>
     <div class="spread"><div class="small mut" id="buildInfo">${buildInfo()}</div>${btn('Build block', 'build', null, 'pri')}</div>
@@ -361,6 +364,7 @@ A.build = () => {
     S.stats.blocksBuilt++; note('info', `Construction started on ${f.name}.`); UI.build = null; dirty(); render();
   });
 };
+A.buildYard = () => { if (S.money < YARD_COST) return toast('bad', `Not enough funds: ${fmt$(YARD_COST)} needed.`); confirmBox('Build exercise yard', `Build another outdoor exercise yard for ${fmt$(YARD_COST)}? It adds room for ${YARD_CAP} inmates at a time.`, 'Build', () => { money(-YARD_COST, 'Construction', 'Exercise yard'); S.yards++; note('good', `New exercise yard opened. Yard capacity is now ${S.yards * YARD_CAP}.`); dirty(); render(); }); };
 A.lockdown = id => { const b = getBlock(id); b.status = b.status === 'Lockdown' ? 'Open' : 'Lockdown'; note(b.status === 'Lockdown' ? 'warn' : 'info', `${b.name}: lockdown ${b.status === 'Lockdown' ? 'imposed' : 'lifted'}.`); if (b.status === 'Lockdown') { b.contraband = clamp(b.contraband - 10); b.incidents = Math.max(0, b.incidents - 2); } dirty(); render(); };
 A.upgrade = id => { const b = getBlock(id); const c = upgradeCost(b); if (c > S.money) return toast('bad', `Not enough funds: ${fmt$(c)} needed.`); confirmBox('Upgrade cells', `Upgrade all ${b.cells.length} cells in ${esc(b.name)} to Tier ${b.tier + 1} (${TIERS[b.tier + 1].name}) for ${fmt$(c)}? Utilities rise to ${fmt$(blockCap(b) * TIERS[b.tier + 1].util)}/day. Takes 1 day.`, 'Upgrade', () => { money(-c, 'Construction', `Upgrade ${b.name} to Tier ${b.tier + 1}`); b.upgrade = { to: b.tier + 1, left: 1 }; dirty(); render(); }); };
 A.renameBlock = id => { const b = getBlock(id); UI._rn = id; openModal(`<h2>Rename block</h2><input type="text" id="rnIn" value="${esc(b.name)}" style="width:100%"><div class="row mt" style="justify-content:flex-end">${btn('Cancel', 'closeModal')}${btn('Save', 'renameOk', null, 'pri')}</div>`, true); };
@@ -382,6 +386,10 @@ V.security = () => {
     ${open.map(x => `<tr><td class="mono small">${x.id}</td><td class="small">${stamp(x.t)}</td><td>${sevTag(x.sev)}</td><td>${x.type}</td><td>${x.who ? inmLink(x.who, x.whoName) : '—'}</td><td style="white-space:normal;min-width:220px" class="small">${esc(x.desc)}</td>
     <td><div class="row" style="flex-wrap:nowrap">${sel('incSel', UI['inc_' + x.id] || standardSanction(x), Object.keys(SANCTIONS), x.id)}${btn('Apply', 'incApply', x.id, 'sm pri')}</div></td></tr>`).join('')}</tbody></table></div>
     <div class="row mt">${btn('Apply standard sanctions to all', 'incAll', null, 'sm')}<span class="tiny dim">${Object.entries(SANCTIONS).map(([k, v]) => `${k}: ${v.d}`).join(' · ')}</span></div>` : '<div class="alert good">No incidents awaiting action.</div>'}</div>`;
+  const pcr = S.inm.filter(i => i.pcRequest);
+  if (pcr.length) h += `<div class="card mb"><h3>Protective custody requests (${pcr.length})</h3><div class="twrap"><table><thead><tr><th>Inmate</th><th>Class</th><th>Reason</th><th class="right">Safety</th><th class="right">Rivals in block</th><th>Requested</th><th></th></tr></thead><tbody>
+    ${pcr.map(i => `<tr><td>${inmLink(i.id, iname(i))} <span class="mono tiny dim">${i.id}</span></td><td>${tag(i.cls)}</td><td style="white-space:normal">${esc(i.pcRequest.why)}</td><td class="right mono">${Math.round(i.n.safety)}</td><td class="right mono">${i.rivals.filter(r => { const x = getInm(r); return x && x.blk === i.blk; }).length}</td><td>Day ${i.pcRequest.d}</td><td><div class="row" style="flex-wrap:nowrap">${btn('Approve transfer', 'pcApprove', i.id, 'sm pri')}${btn('Deny', 'pcDeny', i.id, 'sm')}</div></td></tr>`).join('')}</tbody></table></div>
+    <p class="tiny dim mt6">${freeBeds('Protective')} protective custody beds free. Unanswered requests expire after 5 days, and the inmate's stress rises.</p></div>`;
   h += `<div class="grid g2 mb"><div class="card"><h3>Security policies</h3>
     <div class="field"><label class="f">Automatic handling with standard sanctions</label>${seg('autoHandle', S.settings.autoHandle, [['minor', 'Minor only'], ['moderate', 'Minor + moderate'], ['all', 'All incidents']])}</div>
     <div class="field"><label class="f">Cell searches (cost per inmate per search: $2 daily / $4 weekly)</label>${seg('searches', S.settings.searches, [['off', 'Off'], ['weekly', 'Weekly (Mon)'], ['daily', 'Daily']])}</div>
@@ -400,10 +408,12 @@ V.security = () => {
     { l: 'Details', v: x => x.desc, h: x => `<span class="small" style="white-space:normal;display:inline-block;min-width:240px">${esc(x.desc)}</span>` }, { l: 'Outcome', v: x => x.action || 'Open' }
   ], { sort: 1, dir: -1, per: 15, empty: 'No incidents recorded yet.', filters: [
     { l: 'Severity', opts: ['Minor', 'Moderate', 'Major', 'Critical', 'Positive'], fn: (x, v) => x.sev === v },
-    { l: 'Type', opts: ['Argument', 'Refusal to follow instructions', 'Fight', 'Property damage', 'Contraband', 'Assault on staff', 'Attempted escape', 'Escape', 'Medical emergency', 'Staff shortage', 'Positive behavior', 'Administrative sanction'], fn: (x, v) => x.type === v },
+    { l: 'Type', opts: ['Argument', 'Refusal to follow instructions', 'Fight', 'Property damage', 'Contraband', 'Assault on staff', 'Attempted escape', 'Escape', 'Assault on protective custody', 'Medical emergency', 'Staff shortage', 'Positive behavior', 'Administrative sanction'], fn: (x, v) => x.type === v },
     { l: 'Status', opts: ['Open', 'Closed', 'Recorded'], fn: (x, v) => x.status === v }] })}</div>`;
   return h;
 };
+A.pcApprove = id => { const i = getInm(id); if (!i) return; if (!S.unlock.classes.includes('Protective')) return toast('bad', 'Protective Custody is not unlocked yet.'); if (!transferToPC(i)) return toast('bad', 'No free Protective Custody beds. Build a PC unit in Housing.'); toast('good', `${iname(i)} moved to protective custody.`); dirty(); if (UI.prof) openInmate(id); else render(); };
+A.pcDeny = id => { const i = getInm(id); if (!i) return; i.pcRequest = null; i.n.stress = clamp(i.n.stress + 8); ihist(i, 'Protective custody request denied.'); dirty(); render(); };
 C.incSel = (v, el, id) => { UI['inc_' + id] = v; };
 A.incApply = id => { const x = S.inc.find(x => x.id === id); if (!x || x.status !== 'Open') return; const s = UI['inc_' + id] || standardSanction(x); applySanction(x, s); dirty(); toast('info', `${x.id}: ${s}.`); render(); };
 A.incAll = () => { S.inc.filter(x => x.status === 'Open').forEach(x => applySanction(x, standardSanction(x))); dirty(); render(); };
@@ -463,13 +473,14 @@ C.stAssign = (v, el, id) => { const s = S.staff.find(x => x.id === id); if (s) {
 /* ---------- Regimes ---------- */
 V.regimes = () => {
   const cls = S.unlock.classes;
-  let h = `<h1>Regimes</h1><p class="sub">Daily schedules by security classification, hour by hour. Activities run only when staffing allows: below 50% officer coverage, out-of-cell activities are cancelled.</p>`;
+  let h = `<h1>Regimes</h1><p class="sub">Daily schedules by security classification, hour by hour. Activities run only when staffing allows: below 50% officer coverage, out-of-cell activities are cancelled.</p>
+    <div class="alert info">Yard: ${S.yards} exercise yard${S.yards === 1 ? '' : 's'} holding ${S.yards * YARD_CAP} inmates at once. Today's weather: <b>${S.weather}</b> (rain reduces yard benefits; storms move yard time indoors). Keep Protective Custody's yard time separate from everyone else. ${btn('Manage yards', 'nav', 'housing', 'sm')}</div>`;
   h += `<div class="row mb">${btn('Reset all to default', 'schedReset', null, 'sm')}${sel('schedCopyFrom', UI.copyFrom || cls[0], cls)}${btn('Copy to all classifications', 'schedCopy', null, 'sm')}
     <span class="tiny dim">Legend: ${ACT_NAMES.map(a => `<span class="dot" style="background:${ACTS[a].c}"></span>${ACTS[a].l}`).join(' &nbsp; ')}</span></div>`;
   h += `<div class="sched">`;
   for (const c of cls) {
     const s = S.sched[c]; const w = schedWarnings(c);
-    h += `<div class="col"><div class="spread mb"><b>${tag(c)} ${c}</b><span class="tiny mut">${S.inm.filter(i => i.cls === c).length} inmates</span></div>
+    h += `<div class="col"><div class="spread mb"><b>${tag(c)} ${CLS_LABEL[c]}</b><span class="tiny mut">${S.inm.filter(i => i.cls === c).length} inmates</span></div>
       ${s.map((a, hr) => `<div class="srow"><span class="mono small mut">${String(hr).padStart(2, '0')}:00</span><select data-c="sched" data-arg="${c}|${hr}" style="border-left-color:${ACTS[a].c}">${ACT_NAMES.map(x => `<option value="${x}"${x === a ? ' selected' : ''}>${ACTS[x].l}</option>`).join('')}</select></div>`).join('')}
       <div class="mt6">${w.map(x => `<div class="alert ${x[0]}" style="font-size:12px">${x[1]}</div>`).join('') || '<div class="alert good" style="font-size:12px">Schedule checks passed.</div>'}</div></div>`;
   }
@@ -482,7 +493,9 @@ function schedWarnings(c) {
   if (n('Meal') > 4) out.push(['warn', `${n('Meal')} meal periods will raise food costs.`]);
   if (n('Sleep') < 6) out.push(['warn', `Only ${n('Sleep')} hours of sleep — stress will rise.`]);
   if (!n('Shower')) out.push(['warn', 'No shower period: hygiene will fall.']);
-  if (!n('Recreation') && !n('Free')) out.push(['warn', 'No recreation or free time: recreation and social needs will collapse.']);
+  if (!n('Recreation') && !n('Free') && !n('Yard')) out.push(['warn', 'No yard, recreation or free time: recreation and social needs will collapse.']);
+  if (!n('Yard')) out.push(['info', 'No yard time: inmates never go outdoors. Yard is the best activity for recreation and stress.']);
+  s.forEach((a, hr) => { if (a !== 'Yard') return; const using = S.inm.filter(i => S.sched[i.cls][hr] === 'Yard').length; const cap = (S.yards || 0) * YARD_CAP; if (using > cap) out.push(['bad', `${String(hr).padStart(2, '0')}:00 yard: ${using} inmates scheduled, capacity ${cap}. Stagger times or build another yard.`]); if (c === 'Protective' && CLASSES.some(k => k !== 'Protective' && S.sched[k][hr] === 'Yard' && S.inm.some(i => i.cls === k))) out.push(['bad', `${String(hr).padStart(2, '0')}:00: Protective Custody shares the yard with general population — PC inmates will be attacked.`]); if (c !== 'Protective' && S.sched.Protective[hr] === 'Yard' && S.inm.some(i => i.cls === 'Protective') && pop) out.push(['bad', `${String(hr).padStart(2, '0')}:00: yard time overlaps with Protective Custody.`]); });
   if (n('Work')) { const posts = sum(JOB_NAMES.filter(j => S.unlock.jobs[j] && S.jobs[j].on && S.jobs[j].elig.includes(c)), j => S.jobs[j].pos); if (!posts) out.push(['warn', `Employment hours scheduled but no jobs accept ${c} inmates.`]); }
   if (n('Rehab')) { const progs = PROG_NAMES.filter(p => S.unlock.progs[p] && S.progs[p].on && S.progs[p].elig.includes(c)); const seats = sum(progs, progSeats); if (!seats) out.push(['warn', 'Rehabilitation hours scheduled but no program staff are available.']); else { const enr = S.inm.filter(i => i.prog && progs.includes(i.prog)).length; if (enr > seats) out.push(['info', `Program rooms: ${seats} seats/hour shared across classifications, ${enr} enrolled.`]); } }
   if (n('Visits') && !S.settings.visitDays.some(Boolean)) out.push(['info', 'Visitation scheduled but no visiting days are set (Visitors page).']);

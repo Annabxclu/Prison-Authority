@@ -16,15 +16,19 @@ const wpick = (items) => { let t = sum(items, x => x[1]); let r = rnd() * t; for
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 /* ================= Constants ================= */
-const CLASSES = ['Minimum', 'Medium', 'Maximum', 'Supermax'];
-const CLS_SHORT = { Minimum: 'MIN', Medium: 'MED', Maximum: 'MAX', Supermax: 'SMX' };
-const CLS_MULT = { Minimum: .7, Medium: 1, Maximum: 1.4, Supermax: 1.7 };
-const OFFICER_RATIO = { Minimum: 20, Medium: 12, Maximum: 6, Supermax: 3 };
-const PAROLE_FRAC = { Minimum: .5, Medium: .6, Maximum: .7, Supermax: .85 };
-const DEFAULT_FUNDING = { Minimum: 60, Medium: 75, Maximum: 110, Supermax: 180 };
-const DEFAULT_INTAKE = { Minimum: 5, Medium: 10, Maximum: 4, Supermax: 1 };
-const BEDS_PER_CELL = { Minimum: 2, Medium: 2, Maximum: 1, Supermax: 1 };
-const CELL_BASE_COST = { Minimum: 2200, Medium: 2800, Maximum: 4200, Supermax: 7000 };
+const CLASSES = ['Minimum', 'Medium', 'Maximum', 'Supermax', 'Protective'];
+const CLS_SHORT = { Minimum: 'MIN', Medium: 'MED', Maximum: 'MAX', Supermax: 'SMX', Protective: 'PC' };
+const CLS_LABEL = { Minimum: 'Minimum', Medium: 'Medium', Maximum: 'Maximum', Supermax: 'Supermax', Protective: 'Protective Custody' };
+const CLS_MULT = { Minimum: .7, Medium: 1, Maximum: 1.4, Supermax: 1.7, Protective: .6 };
+const OFFICER_RATIO = { Minimum: 20, Medium: 12, Maximum: 6, Supermax: 3, Protective: 8 };
+const PAROLE_FRAC = { Minimum: .5, Medium: .6, Maximum: .7, Supermax: .85, Protective: .6 };
+const DEFAULT_FUNDING = { Minimum: 60, Medium: 75, Maximum: 110, Supermax: 180, Protective: 105 };
+const DEFAULT_INTAKE = { Minimum: 5, Medium: 10, Maximum: 4, Supermax: 1, Protective: 1 };
+const BEDS_PER_CELL = { Minimum: 2, Medium: 2, Maximum: 1, Supermax: 1, Protective: 1 };
+const CELL_BASE_COST = { Minimum: 2200, Medium: 2800, Maximum: 4200, Supermax: 7000, Protective: 4000 };
+const PC_REASONS = ['Former police officer', 'Former corrections officer', 'Informant / cooperating witness', 'Gang dropout', 'High-profile case', 'Vulnerable (age or health)', 'Former prosecutor\'s investigator', 'Testified against co-defendants'];
+const YARD_CAP = 100, YARD_COST = 30000;
+const WEATHER = [['Clear', 45], ['Cloudy', 30], ['Rain', 18], ['Storm', 7]];
 const TIERS = {
   1: { name: 'Basic', util: 2, cellCost: 0, comfort: -1.2, desc: 'Bed, toilet, basic amenities' },
   2: { name: 'Standard', util: 3.5, cellCost: 1800, comfort: 0, desc: 'Adds shower access and extra basics' },
@@ -68,7 +72,8 @@ const ACTS = {
   Wake: { c: '#6b7c93', l: 'Wake up' },
   Meal: { c: '#4cc38a', l: 'Meal' },
   Work: { c: '#e8b931', l: 'Employment' },
-  Recreation: { c: '#5aa9e6', l: 'Recreation' },
+  Yard: { c: '#3fae6a', l: 'Yard (outdoors)' },
+  Recreation: { c: '#5aa9e6', l: 'Recreation (indoor)' },
   Rehab: { c: '#b48ef0', l: 'Rehabilitation' },
   Shower: { c: '#45c4c4', l: 'Shower' },
   Free: { c: '#8fbf5a', l: 'Free time' },
@@ -81,30 +86,31 @@ function defaultSchedule(cls) {
   s[6] = 'Wake'; s[7] = 'Meal';
   if (cls === 'Supermax') {
     for (let h = 8; h < 24; h++) s[h] = 'Lockdown';
-    s[12] = 'Meal'; s[13] = 'Recreation'; s[14] = 'Rehab'; s[16] = 'Shower'; s[17] = 'Meal'; s[22] = s[23] = 'Sleep';
+    s[12] = 'Meal'; s[11] = 'Yard'; s[13] = 'Recreation'; s[14] = 'Rehab'; s[16] = 'Shower'; s[17] = 'Meal'; s[22] = s[23] = 'Sleep';
     return s;
   }
-  s[8] = s[9] = s[10] = s[11] = 'Work'; s[12] = 'Meal'; s[13] = 'Recreation';
+  s[8] = s[9] = s[10] = s[11] = 'Work'; s[12] = 'Meal'; s[13] = 'Yard';
   s[14] = s[15] = 'Rehab'; s[16] = 'Shower'; s[17] = 'Meal'; s[18] = 'Visits';
-  s[19] = s[20] = 'Free'; s[21] = 'Lockdown';
-  if (cls === 'Maximum') { s[10] = s[11] = 'Lockdown'; s[19] = 'Lockdown'; }
+  s[19] = 'Recreation'; s[20] = 'Free'; s[21] = 'Lockdown';
+  if (cls === 'Maximum') { s[10] = s[11] = 'Lockdown'; s[13] = 'Recreation'; s[15] = 'Yard'; s[20] = 'Lockdown'; }
+  if (cls === 'Protective') { s[13] = 'Recreation'; s[14] = 'Yard'; s[15] = 'Rehab'; }
   return s;
 }
 
 const JOBS = {
   Kitchen: { pos: 6, wage: 1.0, elig: ['Minimum', 'Medium'], desc: 'Each worker adds 15 meals per sitting' },
-  Laundry: { pos: 5, wage: .8, elig: ['Minimum', 'Medium'], desc: 'Improves hygiene across the prison' },
+  Laundry: { pos: 5, wage: .8, elig: ['Minimum', 'Medium', 'Protective'], desc: 'Improves hygiene across the prison' },
   Janitorial: { pos: 8, wage: .7, elig: ['Minimum', 'Medium', 'Maximum'], desc: 'Reduces maintenance costs, improves comfort' },
   Maintenance: { pos: 4, wage: 1.1, elig: ['Minimum'], desc: 'Reduces maintenance costs and damage repairs' },
   Workshop: { pos: 10, wage: 1.5, elig: ['Minimum', 'Medium'], desc: 'Produces contract goods: $11 revenue per worker-hour' },
-  Library: { pos: 3, wage: .7, elig: ['Minimum', 'Medium', 'Maximum'], desc: 'Improves recreation for all inmates' },
+  Library: { pos: 3, wage: .7, elig: ['Minimum', 'Medium', 'Maximum', 'Protective'], desc: 'Improves recreation for all inmates' },
   Canteen: { pos: 3, wage: .8, elig: ['Minimum', 'Medium'], desc: 'Lets inmates make purchases (prison keeps 25%)' }
 };
 const JOB_NAMES = Object.keys(JOBS);
 
 const PROGRAMS = {
-  'Education': { role: 'Teacher', per: 15, hrs: 60, elig: ['Minimum', 'Medium', 'Maximum'], cert: 'GED Certificate', fx: { beh: 8, parole: 10 } },
-  'Vocational Training': { role: 'Teacher', per: 12, hrs: 80, elig: ['Minimum', 'Medium'], cert: 'Trade Certificate', fx: { beh: 6, parole: 14 } },
+  'Education': { role: 'Teacher', per: 15, hrs: 60, elig: ['Minimum', 'Medium', 'Maximum', 'Protective'], cert: 'GED Certificate', fx: { beh: 8, parole: 10 } },
+  'Vocational Training': { role: 'Teacher', per: 12, hrs: 80, elig: ['Minimum', 'Medium', 'Protective'], cert: 'Trade Certificate', fx: { beh: 6, parole: 14 } },
   'Life Skills': { role: 'Rehabilitation Specialist', per: 15, hrs: 30, elig: CLASSES, cert: 'Life Skills Certificate', fx: { beh: 6, parole: 6 } },
   'Anger Management': { role: 'Psychologist', per: 10, hrs: 30, elig: CLASSES, cert: 'Anger Management Completion', fx: { beh: 12, parole: 10, calm: true } },
   'Substance Recovery': { role: 'Rehabilitation Specialist', per: 12, hrs: 50, elig: CLASSES, cert: 'Recovery Program Completion', fx: { beh: 8, parole: 12 } },
@@ -119,7 +125,7 @@ const CHARGES = {
   4: ['Armed robbery', 'Kidnapping', 'Manslaughter', 'Organized crime', 'Weapons trafficking'],
   5: ['Murder', 'Attempted murder', 'Serial armed robbery', 'Criminal enterprise leadership']
 };
-const SEV_RANGE = { Minimum: [1, 2], Medium: [2, 3], Maximum: [3, 4], Supermax: [4, 5] };
+const SEV_RANGE = { Minimum: [1, 2], Medium: [2, 3], Maximum: [3, 4], Supermax: [4, 5], Protective: [1, 4] };
 const SENT_RANGE = { 1: [20, 60], 2: [40, 120], 3: [90, 240], 4: [180, 450], 5: [365, 900] };
 const SEV_LABEL = { 1: 'Low', 2: 'Moderate', 3: 'Serious', 4: 'Severe', 5: 'Extreme' };
 
@@ -138,7 +144,7 @@ const CAREER = [
     reward: 'Grant: $30,000', give: () => { grant(30000, 'Stability grant'); } },
   { id: 'grow', t: 'Growing population', d: 'Build a new cell block and house 45 inmates at once.',
     ok: () => S.stats.blocksBuilt >= 1 && S.inm.length >= 45,
-    reward: 'Unlock Maximum security + $40,000', give: () => { unlockClass('Maximum'); grant(40000, 'Expansion grant'); } },
+    reward: 'Unlock Maximum security + Protective Custody + $40,000', give: () => { unlockClass('Maximum'); unlockClass('Protective'); grant(40000, 'Expansion grant'); } },
   { id: 'rehab', t: 'Second chances', d: 'Have inmates complete 8 rehabilitation programs.',
     ok: () => S.stats.completions >= 8,
     reward: 'Unlock Vocational Training and Workshop jobs', give: () => { S.unlock.progs['Vocational Training'] = true; S.unlock.jobs.Workshop = true; } },
@@ -185,7 +191,7 @@ function newState(cfg) {
       progs: {}, jobs: {}, bonus: cfg.mode !== 'career'
     },
     sched: {}, blocks: [], inm: [], released: [], queue: [], staff: [], cands: [],
-    jobs: {}, progs: {}, food: 0, inc: [], notes: [], tx: [], hist: [], arrivals: [],
+    jobs: {}, progs: {}, food: 0, yards: cfg.size === 'Large' && cfg.mode !== 'career' ? 3 : cfg.size === 'Medium' && cfg.mode !== 'career' ? 2 : 1, weather: 'Clear', inc: [], notes: [], tx: [], hist: [], arrivals: [],
     today: null, yday: null, career: { idx: 0, done: [] },
     stats: { completions: 0, paroleApproved: 0, paroleDenied: 0, releases: 0, escapes: 0, lastEscapeDay: null, blocksBuilt: 0, bestInspection: 0, flagship: false, transfers: 0 },
     inspections: [], lastInspectDay: -99, reports: []
@@ -200,8 +206,8 @@ function newState(cfg) {
   // Starting blocks
   const plans = {
     Small: [['A Block', 'Minimum', 10, 2, 1], ['B Block', 'Medium', 15, 2, 1]],
-    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Maximum', 40, 1, 1], ['Segregation Unit', 'Supermax', 10, 1, 2]],
-    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 60, 1, 1], ['Segregation Unit', 'Supermax', 20, 1, 2]]
+    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Maximum', 30, 1, 1], ['Segregation Unit', 'Supermax', 10, 1, 2], ['PC Unit', 'Protective', 10, 1, 2]],
+    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 45, 1, 1], ['Segregation Unit', 'Supermax', 20, 1, 2], ['PC Unit', 'Protective', 15, 1, 2]]
   };
   let plan = cfg.mode === 'career' ? plans.Small : plans[cfg.size];
   if (cfg.mode !== 'career' && cfg.classes) {
@@ -209,7 +215,7 @@ function newState(cfg) {
     const total = sum(plan, p => p[2] * p[3]);
     plan = plan.filter(p => cfg.classes.includes(p[1]));
     const missing = cfg.classes.filter(c => !plan.some(p => p[1] === c));
-    missing.forEach((c, i) => plan.push([String.fromCharCode(65 + plan.length) + ' Block', c, 10, BEDS_PER_CELL[c], 1]));
+    missing.forEach((c, i) => plan.push([c === 'Protective' ? 'PC Unit' : c === 'Supermax' ? 'Segregation Unit' : String.fromCharCode(65 + plan.length) + ' Block', c, 10, BEDS_PER_CELL[c], 1]));
     let have = sum(plan, p => p[2] * p[3]);
     if (plan.length && have < total) {
       const f = total / have; plan = plan.map(p => [p[0], p[1], Math.max(1, Math.round(p[2] * f)), p[3], p[4]]);
@@ -294,7 +300,7 @@ function genInmate(cls) {
   const sent = Math.round(ri(s1, s2) * (1 + priors * .07) * (1 + (charges.length - 1) * .15));
   // traits
   const pool = [];
-  TRAIT_NAMES.forEach(t => { let w = 10; if (cls === 'Supermax' || cls === 'Maximum') { if (['Aggressive', 'Rebellious', 'Manipulative', 'Leadership-oriented'].includes(t)) w = 18; if (['Cooperative', 'Calm'].includes(t)) w = 5; } if (cls === 'Minimum' && ['Cooperative', 'Calm', 'Hardworking', 'Introverted'].includes(t)) w = 16; pool.push([t, w]); });
+  TRAIT_NAMES.forEach(t => { let w = 10; if (cls === 'Protective') { if (['Introverted', 'Anxious', 'Cooperative', 'Calm'].includes(t)) w = 18; if (['Aggressive', 'Rebellious'].includes(t)) w = 3; } if (cls === 'Supermax' || cls === 'Maximum') { if (['Aggressive', 'Rebellious', 'Manipulative', 'Leadership-oriented'].includes(t)) w = 18; if (['Cooperative', 'Calm'].includes(t)) w = 5; } if (cls === 'Minimum' && ['Cooperative', 'Calm', 'Hardworking', 'Introverted'].includes(t)) w = 16; pool.push([t, w]); });
   const traits = [wpick(pool)]; let t2; do { t2 = wpick(pool); } while (t2 === traits[0] || (t2 === 'Calm' && traits[0] === 'Anxious') || (t2 === 'Anxious' && traits[0] === 'Calm') || (t2 === 'Cooperative' && traits[0] === 'Rebellious') || (t2 === 'Rebellious' && traits[0] === 'Cooperative'));
   traits.push(t2);
   const traitRisk = sum(traits, t => (TRAITS[t].inc - 1) * 12);
@@ -302,7 +308,7 @@ function genInmate(cls) {
   const risk = riskScore < 30 ? 'Low' : riskScore < 48 ? 'Moderate' : riskScore < 66 ? 'High' : 'Extreme';
   const pre = Math.floor(sent * rnd() * .15);
   const d = curDay();
-  const gangP = { Minimum: .04, Medium: .14, Maximum: .3, Supermax: .45 }[cls];
+  const gangP = { Minimum: .04, Medium: .14, Maximum: .3, Supermax: .45, Protective: 0 }[cls];
   const i = {
     id, fn, ln, age: ri(18, 64 - (rnd() < .6 ? 25 : 0)), g: S.pop, adm: d, cls, risk, charges, sev, priors, sent,
     start: d - pre, parole: d + Math.max(2, Math.ceil(sent * PAROLE_FRAC[cls]) - pre), release: d + sent - pre,
@@ -313,9 +319,11 @@ function genInmate(cls) {
     job: null, jobSince: 0, jobHist: [], earn: 0, bal: ri(0, 40), tx: [],
     prog: null, progHrs: 0, progStart: 0, progHist: [], certs: [],
     friends: [], rivals: [], gang: rnd() < gangP ? pick(GANGS) : null,
-    hist: [], hearing: null, infirm: false, sick: false, loc: 'Intake', paroleRec: 0, hearings: 0
+    hist: [], hearing: null, infirm: false, sick: false, loc: 'Intake', paroleRec: 0, hearings: 0,
+    pc: cls === 'Protective' ? pick(PC_REASONS) : null
   };
-  ihist(i, `Admitted. Charges: ${charges.join(', ')}. Sentence ${sent} days.`);
+  if (i.pc === 'Vulnerable (age or health)') i.age = ri(58, 79);
+  ihist(i, `Admitted. Charges: ${charges.join(', ')}. Sentence ${sent} days.${i.pc ? ' Protective custody: ' + i.pc + '.' : ''}`);
   return i;
 }
 function ihist(i, txt) { i.hist.unshift({ t: S.t, x: txt }); if (i.hist.length > 25) i.hist.length = 25; }

@@ -147,6 +147,7 @@ function renderShell() {
     <div class="speeds" id="spd">${SPEEDS.map(v => `<button data-a="speed" data-arg="${v}">${v ? v + 'x' : '❚❚'}</button>`).join('')}</div>
     <div class="hstat hide-m"><span>Balance</span><b id="hBal"></b></div>
     <div class="hstat hide-m"><span>Pop</span><b id="hPop"></b></div>
+    <div class="hstat" title="Employees present today / total employed"><span>Staff</span><b id="hStaff"></b></div>
     <div class="grow"></div>
     <span class="tiny dim hide-m" id="saveDot"></span>
     <button class="hbtn" data-a="nav" data-arg="dashboard" title="Notifications">🔔<span class="badge hide" id="hBadge"></span></button>
@@ -162,6 +163,7 @@ function updateHeader() {
   $('#clk').innerHTML = `Day <b>${curDay()}</b> ${DOW[dow()]} <b>${clockStr()}</b>`;
   $('#hBal').textContent = fmt$(S.money); $('#hBal').className = S.money < 0 ? 'bad' : '';
   $('#hPop').textContent = `${S.inm.length}/${totalCapacity()}`;
+  const pres = S.staff.filter(s => s.present).length; $('#hStaff').textContent = pres === S.staff.length ? S.staff.length : `${pres}/${S.staff.length}`;
   document.querySelectorAll('#spd button').forEach(b => b.classList.toggle('on', +b.dataset.arg === S.speed));
   const unread = S.notes.filter(n => !n.read && (n.lvl === 'bad' || n.lvl === 'warn')).length;
   const bd = $('#hBadge'); bd.textContent = unread; bd.classList.toggle('hide', !unread);
@@ -244,7 +246,7 @@ function renderMenu() {
     <div class="field"><label class="f">Game mode</label><div class="choice" style="grid-template-columns:1fr 1fr">${cbtn('mode', 'sandbox', 'Sandbox', 'Full freedom: choose size, funds and classifications. Everything unlocked.')}${cbtn('mode', 'career', 'Career', 'Start with a small Minimum/Medium prison and unlock facilities through objectives.')}</div></div>
     ${career ? '<div class="alert info">Career starts as a Small prison (50 beds, Minimum + Medium) with $150,000.</div>' : `
     <div class="field"><label class="f">Prison size</label><div class="choice">${cbtn('size', 'Small', 'Small', '50 beds')}${cbtn('size', 'Medium', 'Medium', '150 beds')}${cbtn('size', 'Large', 'Large', '300 beds')}</div></div>
-    <div class="field"><label class="f">Security classifications</label>${CLASSES.map(c => `<label class="chk"><input type="checkbox" data-c="ngCls" data-arg="${c}"${g.classes.includes(c) ? ' checked' : ''}> ${c}</label>`).join('')}</div>
+    <div class="field"><label class="f">Security classifications</label>${CLASSES.map(c => `<label class="chk"><input type="checkbox" data-c="ngCls" data-arg="${c}"${g.classes.includes(c) ? ' checked' : ''}> ${CLS_LABEL[c]}</label>`).join('')}</div>
     <div class="field"><label class="f">Starting funds</label>${seg('ng_funds', g.funds, [['250000', '$250k'], ['500000', '$500k'], ['1000000', '$1M'], ['5000000', '$5M']])}</div>`}
     <div class="grid g3"><div class="field"><label class="f">Population</label>${seg('ng_pop', g.pop, [['Male', 'Male'], ['Female', 'Female']])}</div>
     <div class="field"><label class="f">Starting employees</label>${seg('ng_staff', g.staff, [['recommended', 'Recommended'], ['minimal', 'Minimal'], ['none', 'None']])}</div>
@@ -260,8 +262,8 @@ A.startGame = async () => {
   const g = UI.ng; const career = g.mode === 'career';
   const size = career ? 'Small' : g.size;
   const mult = { low: .6, normal: 1, high: 1.6 }[g.intake];
-  const base = { Small: { Minimum: 3, Medium: 4, Maximum: 2, Supermax: 1 }, Medium: { Minimum: 3, Medium: 5, Maximum: 3, Supermax: 1 }, Large: { Minimum: 6, Medium: 8, Maximum: 5, Supermax: 2 } }[size];
-  const intake = {}; CLASSES.forEach(c => intake[c] = Math.max(c === 'Supermax' ? 0 : 1, Math.round(base[c] * mult)));
+  const base = { Small: { Minimum: 3, Medium: 4, Maximum: 2, Supermax: 1, Protective: 1 }, Medium: { Minimum: 3, Medium: 5, Maximum: 2, Supermax: 1, Protective: 1 }, Large: { Minimum: 6, Medium: 8, Maximum: 4, Supermax: 2, Protective: 1 } }[size];
+  const intake = {}; CLASSES.forEach(c => intake[c] = Math.max(c === 'Supermax' || c === 'Protective' ? 0 : 1, Math.round(base[c] * mult)));
   const cfg = { name: (g.name || 'New Prison').trim().slice(0, 40), mode: g.mode, size, pop: g.pop, funds: career ? 150000 : +g.funds, staff: g.staff, classes: career ? null : CLASSES.filter(c => g.classes.includes(c)), intake, overflow: g.overflow };
   newState(cfg);
   UI.view = 'dashboard'; UI.build = null; for (const k in TS) delete TS[k];
@@ -283,6 +285,11 @@ function migrate(st) {
   // forward-compatible defaults for older saves
   st.settings = Object.assign({ intakeOn: true, overflow: 'queue', queueMax: 40, queueDays: 5, autoReorder: true, reorderDays: 5, autoHandle: 'moderate', searches: 'weekly', screening: 'standard', autoJobs: true, autoEnroll: true, paroleMode: 'review' }, st.settings);
   st.today = st.today || blankDay(); st.inspections = st.inspections || []; st.reports = st.reports || [];
+  if (!st.sched.Protective) st.sched.Protective = defaultSchedule('Protective');
+  ['intake', 'funding'].forEach(k => { if (st.settings[k].Protective == null) st.settings[k].Protective = k === 'intake' ? 0 : DEFAULT_FUNDING.Protective; });
+  if (st.yards == null) { st.yards = Math.max(1, Math.ceil(sum(st.blocks, b => sum(b.cells, c => c.beds)) / 150)); CLASSES.forEach(c => { const s = st.sched[c]; const k = s.indexOf('Recreation'); if (k >= 0 && !s.includes('Yard')) s[k] = 'Yard'; }); }
+  if (!st.weather) st.weather = 'Clear';
+  if (st.mode !== 'career' && !st.unlock.classes.includes('Protective')) st.unlock.classes.push('Protective');
 }
 
 /* ================= Boot ================= */
