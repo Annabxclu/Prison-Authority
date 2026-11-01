@@ -147,7 +147,7 @@ function renderShell() {
     <div class="speeds" id="spd">${SPEEDS.filter(v => v < 100 || S.test).map(v => `<button data-a="speed" data-arg="${v}">${v ? v + 'x' : '❚❚'}</button>`).join('')}</div>
     <div class="hstat hide-m"><span>Balance</span><b id="hBal"></b></div>
     <div class="hstat hide-m"><span>Pop</span><b id="hPop"></b></div>
-    <div class="hstat" title="Employees present today / total employed"><span>Staff</span><b id="hStaff"></b></div>
+    <div class="hstat" title="Total employees"><span>Staff</span><b id="hStaff"></b></div>
     <div class="grow"></div>
     <span class="tiny dim hide-m" id="saveDot"></span>
     <button class="hbtn" data-a="nav" data-arg="dashboard" title="Notifications">🔔<span class="badge hide" id="hBadge"></span></button>
@@ -163,7 +163,7 @@ function updateHeader() {
   $('#clk').innerHTML = `Day <b>${curDay()}</b> ${DOW[dow()]} <b>${clockStr()}</b>`;
   $('#hBal').textContent = fmt$(S.money); $('#hBal').className = S.money < 0 ? 'bad' : '';
   $('#hPop').textContent = `${S.inm.length}/${totalCapacity()}`;
-  const pres = S.staff.filter(s => s.present).length; $('#hStaff').textContent = pres === S.staff.length ? S.staff.length : `${pres}/${S.staff.length}`;
+  $('#hStaff').textContent = S.staff.length;
   document.querySelectorAll('#spd button').forEach(b => b.classList.toggle('on', +b.dataset.arg === S.speed));
   const unread = S.notes.filter(n => !n.read && (n.lvl === 'bad' || n.lvl === 'warn')).length;
   const bd = $('#hBadge'); bd.textContent = unread; bd.classList.toggle('hide', !unread);
@@ -289,6 +289,7 @@ function migrate(st) {
   ['intake', 'funding'].forEach(k => { if (st.settings[k].Protective == null) st.settings[k].Protective = k === 'intake' ? 0 : DEFAULT_FUNDING.Protective; });
   if (st.yards == null) { st.yards = Math.max(1, Math.ceil(sum(st.blocks, b => sum(b.cells, c => c.beds)) / 150)); CLASSES.forEach(c => { const s = st.sched[c]; const k = s.indexOf('Recreation'); if (k >= 0 && !s.includes('Yard')) s[k] = 'Yard'; }); }
   if (!st.weather) st.weather = 'Clear';
+  (st.staff || []).forEach(s => { s.present = true; s.quit = false; });
   if (st.mode !== 'career') CLASSES.forEach(c => { if (!st.unlock.classes.includes(c)) st.unlock.classes.push(c); });
   CLASSES.forEach(c => { if (!st.sched[c]) st.sched[c] = defaultSchedule(c); if (st.settings.intake[c] == null) st.settings.intake[c] = 0; if (st.settings.funding[c] == null) st.settings.funding[c] = DEFAULT_FUNDING[c]; });
   PROG_NAMES.forEach(p => { if (!st.progs[p]) st.progs[p] = { on: true, cap: 30, elig: PROGRAMS[p].elig.slice(), completions: 0 }; if (st.unlock.progs[p] == null) st.unlock.progs[p] = true; });

@@ -669,14 +669,9 @@ function dayTick() {
   S.staff.forEach(s => {
     const m = S.money < 0 ? -10 : 0;
     s.morale = clamp(s.morale + (70 - s.morale) * .1 + m * .3 + (warden ? .5 : 0));
-    const p = clamp(s.att + warden - (s.morale < 40 ? 10 : 0) + m, 40, 99.5) / 100;
-    s.present = rnd() < p;
+    s.present = true; // staff always report for duty and never resign
     s.perf = clamp(s.perf + (s.morale - 60) / 200 + .02);
-    if (rnd() < .002 * (s.morale < 30 ? 6 : 1)) { s.quit = true; }
   });
-  const quit = S.staff.filter(s => s.quit); if (quit.length) { S.staff = S.staff.filter(s => !s.quit); quit.forEach(s => note('warn', `${s.role} ${s.fn} ${s.ln} resigned${s.morale < 30 ? ' (low morale)' : ''}.`)); }
-  const absent = S.staff.filter(s => !s.present).length;
-  if (absent) { const offAbs = S.staff.filter(s => !s.present && s.role === 'Correctional Officer').length; if (offAbs >= 2) note('warn', `${absent} employees absent today, including ${offAbs} officers.`); }
   // --- Construction
   S.blocks.forEach(b => {
     if (b.status === 'Construction') { b.buildLeft--; if (b.buildLeft <= 0) { b.status = 'Open'; note('good', `${b.name} construction complete — ${blockCap(b)} ${b.cls} beds now available.`); } }

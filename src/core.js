@@ -222,8 +222,8 @@ function newState(cfg) {
   // Starting blocks
   const plans = {
     Small: [['A Block', 'Minimum', 10, 2, 1], ['B Block', 'Medium', 15, 2, 1]],
-    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 25, 2, 1], ['C Block', 'Maximum', 24, 1, 1], ['Segregation Unit', 'Supermax', 8, 1, 2], ['PC Unit', 'Protective', 10, 1, 2], ['Death Row', 'DeathRow', 8, 1, 2], ['Forensic Unit', 'Insane', 10, 1, 2]],
-    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 50, 1, 1], ['Segregation Unit', 'Supermax', 15, 1, 2], ['PC Unit', 'Protective', 15, 1, 2], ['Death Row', 'DeathRow', 12, 1, 2], ['Forensic Unit', 'Insane', 18, 1, 2]]
+    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 25, 2, 1], ['C Block', 'Maximum', 24, 1, 1], ['Segregation Unit', 'Supermax', 8, 1, 2], ['PC Unit', 'Protective', 20, 1, 2], ['Death Row', 'DeathRow', 8, 1, 2], ['Forensic Unit', 'Insane', 20, 1, 2]],
+    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 50, 1, 1], ['Segregation Unit', 'Supermax', 15, 1, 2], ['PC Unit', 'Protective', 20, 1, 2], ['Death Row', 'DeathRow', 12, 1, 2], ['Forensic Unit', 'Insane', 20, 1, 2]]
   };
   let plan = cfg.mode === 'career' ? plans.Small : plans[cfg.size];
   if (cfg.mode !== 'career' && cfg.classes) {
@@ -231,7 +231,7 @@ function newState(cfg) {
     const total = sum(plan, p => p[2] * p[3]);
     plan = plan.filter(p => cfg.classes.includes(p[1]));
     const missing = cfg.classes.filter(c => !plan.some(p => p[1] === c));
-    missing.forEach((c, i) => plan.push([c === 'Protective' ? 'PC Unit' : c === 'Supermax' ? 'Segregation Unit' : c === 'DeathRow' ? 'Death Row' : c === 'Insane' ? 'Forensic Unit' : String.fromCharCode(65 + plan.length) + ' Block', c, 10, BEDS_PER_CELL[c], 1]));
+    missing.forEach((c, i) => plan.push([c === 'Protective' ? 'PC Unit' : c === 'Supermax' ? 'Segregation Unit' : c === 'DeathRow' ? 'Death Row' : c === 'Insane' ? 'Forensic Unit' : String.fromCharCode(65 + plan.length) + ' Block', c, c === 'Protective' || c === 'Insane' ? 20 : 10, BEDS_PER_CELL[c], 1]));
     let have = sum(plan, p => p[2] * p[3]);
     if (plan.length && have < total) {
       const f = total / have; plan = plan.map(p => [p[0], p[1], Math.max(1, Math.round(p[2] * f)), p[3], p[4]]);

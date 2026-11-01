@@ -416,8 +416,8 @@ function newState(cfg) {
   // Starting blocks
   const plans = {
     Small: [['A Block', 'Minimum', 10, 2, 1], ['B Block', 'Medium', 15, 2, 1]],
-    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 25, 2, 1], ['C Block', 'Maximum', 24, 1, 1], ['Segregation Unit', 'Supermax', 8, 1, 2], ['PC Unit', 'Protective', 10, 1, 2], ['Death Row', 'DeathRow', 8, 1, 2], ['Forensic Unit', 'Insane', 10, 1, 2]],
-    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 50, 1, 1], ['Segregation Unit', 'Supermax', 15, 1, 2], ['PC Unit', 'Protective', 15, 1, 2], ['Death Row', 'DeathRow', 12, 1, 2], ['Forensic Unit', 'Insane', 18, 1, 2]]
+    Medium: [['A Block', 'Minimum', 20, 2, 1], ['B Block', 'Medium', 25, 2, 1], ['C Block', 'Maximum', 24, 1, 1], ['Segregation Unit', 'Supermax', 8, 1, 2], ['PC Unit', 'Protective', 20, 1, 2], ['Death Row', 'DeathRow', 8, 1, 2], ['Forensic Unit', 'Insane', 20, 1, 2]],
+    Large: [['A Block', 'Minimum', 40, 2, 1], ['B Block', 'Medium', 30, 2, 1], ['C Block', 'Medium', 25, 2, 2], ['D Block', 'Maximum', 50, 1, 1], ['Segregation Unit', 'Supermax', 15, 1, 2], ['PC Unit', 'Protective', 20, 1, 2], ['Death Row', 'DeathRow', 12, 1, 2], ['Forensic Unit', 'Insane', 20, 1, 2]]
   };
   let plan = cfg.mode === 'career' ? plans.Small : plans[cfg.size];
   if (cfg.mode !== 'career' && cfg.classes) {
@@ -425,7 +425,7 @@ function newState(cfg) {
     const total = sum(plan, p => p[2] * p[3]);
     plan = plan.filter(p => cfg.classes.includes(p[1]));
     const missing = cfg.classes.filter(c => !plan.some(p => p[1] === c));
-    missing.forEach((c, i) => plan.push([c === 'Protective' ? 'PC Unit' : c === 'Supermax' ? 'Segregation Unit' : c === 'DeathRow' ? 'Death Row' : c === 'Insane' ? 'Forensic Unit' : String.fromCharCode(65 + plan.length) + ' Block', c, 10, BEDS_PER_CELL[c], 1]));
+    missing.forEach((c, i) => plan.push([c === 'Protective' ? 'PC Unit' : c === 'Supermax' ? 'Segregation Unit' : c === 'DeathRow' ? 'Death Row' : c === 'Insane' ? 'Forensic Unit' : String.fromCharCode(65 + plan.length) + ' Block', c, c === 'Protective' || c === 'Insane' ? 20 : 10, BEDS_PER_CELL[c], 1]));
     let have = sum(plan, p => p[2] * p[3]);
     if (plan.length && have < total) {
       const f = total / have; plan = plan.map(p => [p[0], p[1], Math.max(1, Math.round(p[2] * f)), p[3], p[4]]);
@@ -1268,14 +1268,9 @@ function dayTick() {
   S.staff.forEach(s => {
     const m = S.money < 0 ? -10 : 0;
     s.morale = clamp(s.morale + (70 - s.morale) * .1 + m * .3 + (warden ? .5 : 0));
-    const p = clamp(s.att + warden - (s.morale < 40 ? 10 : 0) + m, 40, 99.5) / 100;
-    s.present = rnd() < p;
+    s.present = true; // staff always report for duty and never resign
     s.perf = clamp(s.perf + (s.morale - 60) / 200 + .02);
-    if (rnd() < .002 * (s.morale < 30 ? 6 : 1)) { s.quit = true; }
   });
-  const quit = S.staff.filter(s => s.quit); if (quit.length) { S.staff = S.staff.filter(s => !s.quit); quit.forEach(s => note('warn', `${s.role} ${s.fn} ${s.ln} resigned${s.morale < 30 ? ' (low morale)' : ''}.`)); }
-  const absent = S.staff.filter(s => !s.present).length;
-  if (absent) { const offAbs = S.staff.filter(s => !s.present && s.role === 'Correctional Officer').length; if (offAbs >= 2) note('warn', `${absent} employees absent today, including ${offAbs} officers.`); }
   // --- Construction
   S.blocks.forEach(b => {
     if (b.status === 'Construction') { b.buildLeft--; if (b.buildLeft <= 0) { b.status = 'Open'; note('good', `${b.name} construction complete — ${blockCap(b)} ${b.cls} beds now available.`); } }
@@ -1928,9 +1923,9 @@ A.autoOff = () => { autoAssignOfficers(); dirty(); render(); };
 /* ---------- Personnel ---------- */
 V.personnel = () => {
   const req = requirements();
-  let h = `<h1>Personnel</h1><p class="sub">${S.staff.length} employees · payroll ${fmt$(sum(S.staff, s => s.sal / 365))}/day · ${S.staff.filter(s => !s.present).length} absent today. Staffing shortages reduce safety, service quality and capacity.</p>`;
-  h += `<div class="grid g2 mb"><div class="card"><h3>Staffing requirements</h3><div class="twrap"><table><thead><tr><th>Role</th><th class="right">Employed</th><th class="right">Present</th><th class="right">Needed</th><th>Purpose</th></tr></thead><tbody>
-    ${ROLE_NAMES.map(r => { const have = staffCount(r), need = req[r] || 0; return `<tr><td>${r}</td><td class="right mono ${have < need ? 'warn' : ''}">${have}</td><td class="right mono">${staffCount(r, true)}</td><td class="right mono">${need}</td><td class="small mut" style="white-space:normal">${ROLE_HELP[r]}</td></tr>`; }).join('')}
+  let h = `<h1>Personnel</h1><p class="sub">${S.staff.length} employees · payroll ${fmt$(sum(S.staff, s => s.sal / 365))}/day. Staffing shortages reduce safety, service quality and capacity.</p>`;
+  h += `<div class="grid g2 mb"><div class="card"><h3>Staffing requirements</h3><div class="twrap"><table><thead><tr><th>Role</th><th class="right">Employed</th><th class="right">Needed</th><th>Purpose</th></tr></thead><tbody>
+    ${ROLE_NAMES.map(r => { const have = staffCount(r), need = req[r] || 0; return `<tr><td>${r}</td><td class="right mono ${have < need ? 'warn' : ''}">${have}</td><td class="right mono">${need}</td><td class="small mut" style="white-space:normal">${ROLE_HELP[r]}</td></tr>`; }).join('')}
     </tbody></table></div><div class="row mt">${btn('Auto-assign officers', 'autoOff', null, 'sm')}${btn('Hire to meet needs', 'hireNeeds', null, 'sm')}</div></div>
     <div class="card"><div class="spread"><h3>Job applicants</h3><span class="tiny dim">New applicants every 2 days · signing cost $500</span></div><div class="twrap"><table><thead><tr><th>Name</th><th>Role</th><th class="right">Exp</th><th class="right">Perf</th><th class="right">Salary</th><th></th></tr></thead><tbody>
     ${S.cands.map(c => `<tr><td>${esc(c.fn + ' ' + c.ln)}</td><td>${c.role}</td><td class="right mono">${c.exp}y</td><td class="right mono">${c.perf}</td><td class="right mono">${fmt$(c.sal)}</td><td>${btn('Hire', 'hire', c.id, 'sm pri')}</td></tr>`).join('') || '<tr><td colspan=6 class="mut">No applicants right now.</td></tr>'}
@@ -1941,12 +1936,11 @@ V.personnel = () => {
     { l: 'ID', v: s => s.id, h: s => `<span class="mono">${s.id}</span>` }, { l: 'Name', v: s => s.fn + ' ' + s.ln }, { l: 'Position', v: s => s.role }, { l: 'Department', v: s => s.dept },
     { l: 'Salary', v: s => s.sal, r: 1, h: s => `<span class="mono">${fmt$(s.sal)}</span>` }, { l: 'Exp', v: s => s.exp, r: 1, h: s => s.exp + 'y' },
     { l: 'Performance', v: s => Math.round(s.perf), h: s => `<div class="row" style="gap:6px;flex-wrap:nowrap">${bar(s.perf)}<span class="mono small">${Math.round(s.perf)}</span></div>` },
-    { l: 'Attendance', v: s => s.att, r: 1, h: s => s.att + '%' }, { l: 'Morale', v: s => Math.round(s.morale), r: 1 },
-    { l: 'Today', v: s => s.present ? 'Present' : 'Absent', h: s => s.present ? '<span class="good">Present</span>' : '<span class="bad">Absent</span>' },
+    { l: 'Morale', v: s => Math.round(s.morale), r: 1 },
     { l: 'Shift', v: s => s.shift, ns: 1, h: s => sel('stShift', s.shift, [['Day', 'Day 06–18'], ['Night', 'Night 18–06']], s.id) },
     { l: 'Assignment', v: s => s.assign ? (getBlock(s.assign) || {}).name : '', ns: 1, h: s => s.role === 'Correctional Officer' ? sel('stAssign', s.assign || '', blockOpts, s.id) : `<span class="mut small">${s.dept}</span>` },
     { l: '', v: () => '', ns: 1, q: false, h: s => btn('Dismiss', 'fire', s.id, 'sm danger') }
-  ], { sort: 2, per: 20, empty: 'No employees. Hire staff from the applicants above.', filters: [{ l: 'Role', opts: ROLE_NAMES, fn: (s, v) => s.role === v }, { l: 'Shift', opts: ['Day', 'Night'], fn: (s, v) => s.shift === v }, { l: 'Today', opts: ['Present', 'Absent'], fn: (s, v) => (s.present ? 'Present' : 'Absent') === v }] })}</div>`;
+  ], { sort: 2, per: 20, empty: 'No employees. Hire staff from the applicants above.', filters: [{ l: 'Role', opts: ROLE_NAMES, fn: (s, v) => s.role === v }, { l: 'Shift', opts: ['Day', 'Night'], fn: (s, v) => s.shift === v }] })}</div>`;
   return h;
 };
 const ROLE_HELP = {
@@ -2226,7 +2220,6 @@ V.reports = () => {
     ['Avg inmate satisfaction', Math.round(avg(L, x => x.sat)), P.length ? Math.round(avg(P, x => x.sat)) : null],
     ['Avg safety', Math.round(avg(L, x => x.needs.safety)), P.length ? Math.round(avg(P, x => x.needs.safety)) : null],
     ['Avg officer coverage', pct(Math.min(1, avg(L, x => x.cov))), P.length ? pct(Math.min(1, avg(P, x => x.cov))) : null],
-    ['Staff attendance', pct(avg(L, x => x.att)), P.length ? pct(avg(P, x => x.att)) : null],
     ['Visits', agg(L, x => x.visits), P.length ? agg(P, x => x.visits) : null],
     ['Contraband finds', agg(L, x => x.contraband), P.length ? agg(P, x => x.contraband) : null, true]
   ];
@@ -2247,7 +2240,6 @@ function reportRecs(L) {
   const mc = sum(L, x => x.incidents.Major + x.incidents.Critical); if (mc / L.length > 1) out.push(['warn', `${mc} major/critical incidents. Check officer coverage, separate rivals, and enrol aggressive inmates in Anger Management.`]);
   if (sum(L, x => x.escapes)) out.push(['bad', `${sum(L, x => x.escapes)} escape(s). Coverage in high-security blocks must be raised.`]);
   if (avg(L, x => x.cov) < .8) out.push(['warn', `Average officer coverage ${pct(avg(L, x => x.cov))}. Hire officers or rebalance shifts.`]);
-  if (avg(L, x => x.att) < .9) out.push(['warn', `Staff attendance is ${pct(avg(L, x => x.att))}. A Warden and a positive balance improve morale.`]);
   if (last.needs.hygiene < 40) out.push(['warn', 'Hygiene is low — add shower periods or upgrade cells to Tier 2.']);
   if (last.needs.rec < 40) out.push(['warn', 'Recreation is low — schedule more recreation/free time or staff the library.']);
   if (last.needs.stress > 55) out.push(['warn', 'Stress is elevated — improve meals, recreation, visits and counseling.']);
@@ -2347,7 +2339,7 @@ V.testing = () => {
   h += box('Death row', `<div class="row">${btn('All appeals due today', 'tAppeals', null, 'sm')}${btn('Exhaust appeals for one', 'tExhaust', null, 'sm')}${btn('Add death row inmate', 'tSpawnDR', null, 'sm')}</div>`);
   h += box('Criminally insane', `<div class="row">${btn('Psychiatric crisis (all → 10)', 'tPsych', 10, 'sm')}${btn('Stabilize all (→ 90)', 'tPsych', 90, 'sm')}</div>`);
   h += box('Needs', `<div class="row">${btn('All needs perfect', 'tNeeds', 100, 'sm')}${btn('All needs terrible', 'tNeeds', 15, 'sm')}${btn('Heal everyone', 'tHeal', null, 'sm')}</div>`);
-  h += box('Staff', `<div class="row">${btn('Hire to meet needs (free)', 'tHire', null, 'sm')}${btn('Everyone present', 'tPresent', 1, 'sm')}${btn('Half of officers absent', 'tPresent', 0, 'sm')}</div>`);
+  h += box('Staff', `<div class="row">${btn('Hire to meet needs (free)', 'tHire', null, 'sm')}</div>`);
   h += box('World', `<div class="row">${sel('tWeather', S.weather, WEATHER.map(w => w[0]))}${btn('PC request', 'tPC', null, 'sm')}${btn('Run inspection', 'tInspect', null, 'sm')}${btn('Unlock everything', 'tUnlock', null, 'sm')}${S.mode === 'career' ? btn('Complete next objective', 'tObjective', null, 'sm') : ''}</div>`);
   h += `</div><div class="card"><h3>Debug</h3><div class="kv small"><div>Save size</div><div class="mono">${fmtN(JSON.stringify(S).length / 1024)} KB</div><div>Inmates / queue / released</div><div class="mono">${S.inm.length} / ${S.queue.length} / ${S.released.length}</div><div>Incidents stored</div><div class="mono">${S.inc.length}</div><div>Game time (minutes)</div><div class="mono">${S.t}</div><div>Storage</div><div>${Store.mode}</div></div>
     <div class="row mt">${btn('Disable test tools', 'testOff', null, 'sm')}</div></div>`;
@@ -2532,7 +2524,7 @@ function renderShell() {
     <div class="speeds" id="spd">${SPEEDS.filter(v => v < 100 || S.test).map(v => `<button data-a="speed" data-arg="${v}">${v ? v + 'x' : '❚❚'}</button>`).join('')}</div>
     <div class="hstat hide-m"><span>Balance</span><b id="hBal"></b></div>
     <div class="hstat hide-m"><span>Pop</span><b id="hPop"></b></div>
-    <div class="hstat" title="Employees present today / total employed"><span>Staff</span><b id="hStaff"></b></div>
+    <div class="hstat" title="Total employees"><span>Staff</span><b id="hStaff"></b></div>
     <div class="grow"></div>
     <span class="tiny dim hide-m" id="saveDot"></span>
     <button class="hbtn" data-a="nav" data-arg="dashboard" title="Notifications">🔔<span class="badge hide" id="hBadge"></span></button>
@@ -2548,7 +2540,7 @@ function updateHeader() {
   $('#clk').innerHTML = `Day <b>${curDay()}</b> ${DOW[dow()]} <b>${clockStr()}</b>`;
   $('#hBal').textContent = fmt$(S.money); $('#hBal').className = S.money < 0 ? 'bad' : '';
   $('#hPop').textContent = `${S.inm.length}/${totalCapacity()}`;
-  const pres = S.staff.filter(s => s.present).length; $('#hStaff').textContent = pres === S.staff.length ? S.staff.length : `${pres}/${S.staff.length}`;
+  $('#hStaff').textContent = S.staff.length;
   document.querySelectorAll('#spd button').forEach(b => b.classList.toggle('on', +b.dataset.arg === S.speed));
   const unread = S.notes.filter(n => !n.read && (n.lvl === 'bad' || n.lvl === 'warn')).length;
   const bd = $('#hBadge'); bd.textContent = unread; bd.classList.toggle('hide', !unread);
@@ -2674,6 +2666,7 @@ function migrate(st) {
   ['intake', 'funding'].forEach(k => { if (st.settings[k].Protective == null) st.settings[k].Protective = k === 'intake' ? 0 : DEFAULT_FUNDING.Protective; });
   if (st.yards == null) { st.yards = Math.max(1, Math.ceil(sum(st.blocks, b => sum(b.cells, c => c.beds)) / 150)); CLASSES.forEach(c => { const s = st.sched[c]; const k = s.indexOf('Recreation'); if (k >= 0 && !s.includes('Yard')) s[k] = 'Yard'; }); }
   if (!st.weather) st.weather = 'Clear';
+  (st.staff || []).forEach(s => { s.present = true; s.quit = false; });
   if (st.mode !== 'career') CLASSES.forEach(c => { if (!st.unlock.classes.includes(c)) st.unlock.classes.push(c); });
   CLASSES.forEach(c => { if (!st.sched[c]) st.sched[c] = defaultSchedule(c); if (st.settings.intake[c] == null) st.settings.intake[c] = 0; if (st.settings.funding[c] == null) st.settings.funding[c] = DEFAULT_FUNDING[c]; });
   PROG_NAMES.forEach(p => { if (!st.progs[p]) st.progs[p] = { on: true, cap: 30, elig: PROGRAMS[p].elig.slice(), completions: 0 }; if (st.unlock.progs[p] == null) st.unlock.progs[p] = true; });
