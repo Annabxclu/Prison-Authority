@@ -2556,7 +2556,7 @@ function fbErr(e) {
 }
 
 const Store = {
-  mode: 'none', db: null, uid: null, lastSaved: 0, saving: false, pending: false, tab: uid(), gens: {},
+  mode: 'none', db: null, uid: null, lastSaved: 0, saving: false, pending: false, tab: sessionTabId(), gens: {},
   remote() { return this.mode === 'cloud' || this.mode === 'firebase'; },
   localOK: false,
   useAuth() {
@@ -2640,8 +2640,10 @@ const Store = {
 };
 
 /* Single-simulation lock: one tab/device runs a prison at a time */
+/* A browser tab keeps the same session id across refreshes, so reloading the page never looks like "another window" */
+function sessionTabId() { try { let t = sessionStorage.getItem('psim_tab'); if (!t) { t = uid(); sessionStorage.setItem('psim_tab', t); } return t; } catch (e) { return uid(); } }
 const Lock = {
-  slot: null, lost: false, timer: null, bc: null,
+  slot: null, lost: false, timer: null, bc: null, wait: null,
   async take(slot) {
     this.slot = slot; this.lost = false;
     if (Store.remote()) {
@@ -2662,15 +2664,36 @@ const Lock = {
     if (!this.slot || this.lost || !Store.remote()) return;
     try { const r = await Store.col().doc('lock-' + this.slot).acquire({ holder: Store.tab, ttlMs: 45000 }); if (!r.acquired) this.onLost(); } catch (e) { }
   },
-  onLost() { this.lost = true; setSpeed(0); showLockBanner(); },
-  release() { clearInterval(this.timer); this.slot = null; this.lost = false; }
+  onLost() { this.lost = true; setSpeed(0); showLockBanner(); this.autoRetry(); },
+  /* Keep checking quietly; resume automatically as soon as the other session's hold expires */
+  autoRetry() {
+    clearInterval(this.wait); const started = Date.now();
+    this.wait = setInterval(async () => {
+      if (!S || !this.lost) { clearInterval(this.wait); return; }
+      const ok = await this.take(S.id);
+      if (ok) { clearInterval(this.wait); resumeAfterLock(); }
+      else { const el = document.getElementById('lockWait'); if (el) el.textContent = `Still checking… (${Math.round((Date.now() - started) / 1000)}s)`; if (Date.now() - started > 120000) clearInterval(this.wait); }
+    }, 5000);
+  },
+  /* Let go of the hold so another window (or this one after a refresh) can take over straight away */
+  async free() {
+    const slot = this.slot; clearInterval(this.timer); clearInterval(this.wait);
+    if (slot && !this.lost && Store.mode === 'firebase') { try { await Store.col().doc('lock-' + slot).set({ kind: 'lock', holder: '', exp: 0 }); } catch (e) { } }
+  },
+  release() { this.free(); this.slot = null; this.lost = false; }
 };
 function showLockBanner() {
   const el = document.createElement('div'); el.className = 'lockbanner'; el.id = 'lockBanner';
-  el.innerHTML = `<div class="card" style="max-width:440px"><h2>Running elsewhere</h2><p class="mut">This prison is open in another tab or on another device. To prevent two simulations running at once, it is paused here.</p><div class="row">${btn('Try again', 'lockRetry', null, 'pri')}${btn('Back to menu', 'quitNoSave', null)}</div><p class="tiny dim mt">If you closed the other window, the hold is released within about 45 seconds.</p></div>`;
+  el.innerHTML = `<div class="card" style="max-width:440px"><h2>Running elsewhere</h2><p class="mut">This prison is open in another tab or on another device. To prevent two simulations running at once, it is paused here.</p><div class="row">${btn('Try again', 'lockRetry', null, 'pri')}${Store.mode === 'firebase' ? btn('Play here instead', 'lockTake', null) : ''}${btn('Back to menu', 'quitNoSave', null)}</div><p class="tiny dim mt">If you closed the other window, this resumes by itself within about 45 seconds. <span id="lockWait"></span></p></div>`;
   document.getElementById('lockBanner')?.remove(); document.body.appendChild(el);
 }
-A.lockRetry = async () => { const ok = await Lock.take(S.id); if (ok) { document.getElementById('lockBanner')?.remove(); toast('good', 'Control resumed in this window.'); try { const fresh = await Store.load(S.id); S = fresh; renderShell(); render(); } catch (e) { } } else toast('warn', 'Still open elsewhere. Try again shortly.'); };
+async function resumeAfterLock() {
+  clearInterval(Lock.wait); document.getElementById('lockBanner')?.remove(); toast('good', 'Control resumed in this window.');
+  try { const fresh = await Store.load(S.id); migrate(fresh); fresh.speed = 0; S = fresh; renderShell(); render(); } catch (e) { }
+}
+A.lockRetry = async () => { const ok = await Lock.take(S.id); if (ok) resumeAfterLock(); else toast('warn', 'Still open elsewhere. Try again shortly.'); };
+/* Firebase only: take the prison over from the other window (that window pauses at its next check) */
+A.lockTake = async () => { try { await Store.col().doc('lock-' + S.id).set({ kind: 'lock', holder: Store.tab, exp: Date.now() + 45000 }); } catch (e) { return toast('bad', fbErr(e)); } const ok = await Lock.take(S.id); if (ok) resumeAfterLock(); };
 
 /* ================= Game loop ================= */
 const SPEEDS = [0, 1, 2, 4, 10, 30, 100];
@@ -2692,7 +2715,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) { if (S.speed > 0) { hiddenPaused = S.speed; } Store.save(S); }
   else { lastTick = performance.now(); if (Store.remote()) Lock.renew(); }
 });
-window.addEventListener('pagehide', () => { if (S) Store.save(S); });
+window.addEventListener('pagehide', () => { if (S) { Store.save(S); Lock.free(); } });
+window.addEventListener('pageshow', ev => { if (ev.persisted && S && Lock.slot) Lock.take(S.id).then(ok => { if (!ok) Lock.onLost(); }); });
 function dirty() { UI.dirty = true; }
 function liveRender() {
   if (UI.modal) { if (UI.prof && !document.activeElement?.closest?.('.modal select,.modal input')) { const t = UI.profTab; openInmate(UI.prof); UI.profTab = t; } return; }
