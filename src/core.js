@@ -360,9 +360,9 @@ function modeLabel(m) { return m === 'career' ? 'Career' : m === 'test' ? 'Test'
 const INC_TYPES = ['Argument', 'Refusal to follow instructions', 'Fight', 'Property damage', 'Contraband', 'Assault on staff', 'Attempted escape', 'Assault on protective custody', 'Psychotic episode', 'Medical emergency'];
 function defaultDiscipline() {
   return {
-    'Argument': { s: 'Verbal warning', days: 0 }, 'Refusal to follow instructions': { s: 'Loss of privileges', days: 2 }, 'Fight': { s: 'Solitary confinement', days: 3 },
-    'Property damage': { s: 'Restitution', days: 0 }, 'Contraband': { s: 'Investigation', days: 0 }, 'Assault on staff': { s: 'Solitary confinement', days: 7 },
-    'Attempted escape': { s: 'Refer for prosecution', days: 0 }, 'Assault on protective custody': { s: 'Solitary confinement', days: 7 }, 'Psychotic episode': { s: 'Psychiatric observation', days: 2 }, 'Medical emergency': { s: 'Medical evaluation', days: 0 }
+    'Argument': [{ s: 'Verbal warning' }], 'Refusal to follow instructions': [{ s: 'Loss of privileges', days: 2 }], 'Fight': [{ s: 'Solitary confinement', days: 3 }],
+    'Property damage': [{ s: 'Restitution' }, { s: 'Loss of privileges', days: 2 }], 'Contraband': [{ s: 'Investigation' }, { s: 'Loss of privileges', days: 3 }], 'Assault on staff': [{ s: 'Solitary confinement', days: 7 }, { s: 'Loss of job' }],
+    'Attempted escape': [{ s: 'Refer for prosecution' }, { s: 'Solitary confinement', days: 5 }], 'Assault on protective custody': [{ s: 'Solitary confinement', days: 7 }], 'Psychotic episode': [{ s: 'Psychiatric observation', days: 2 }], 'Medical emergency': [{ s: 'Medical evaluation' }]
   };
 }
 

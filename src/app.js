@@ -293,7 +293,9 @@ function migrate(st) {
   if (st.mode !== 'career') CLASSES.forEach(c => { if (!st.unlock.classes.includes(c)) st.unlock.classes.push(c); });
   CLASSES.forEach(c => { if (!st.sched[c]) st.sched[c] = defaultSchedule(c); if (st.settings.intake[c] == null) st.settings.intake[c] = 0; if (st.settings.funding[c] == null) st.settings.funding[c] = DEFAULT_FUNDING[c]; });
   PROG_NAMES.forEach(p => { if (!st.progs[p]) st.progs[p] = { on: true, cap: 30, elig: PROGRAMS[p].elig.slice(), completions: 0 }; if (st.unlock.progs[p] == null) st.unlock.progs[p] = true; });
-  if (!st.settings.disc) st.settings.disc = defaultDiscipline(); if (st.settings.escalate == null) st.settings.escalate = true; if (!st.settings.progChoice) st.settings.progChoice = 'inmate';
+  if (!st.settings.disc) st.settings.disc = defaultDiscipline();
+  for (const t in st.settings.disc) if (!Array.isArray(st.settings.disc[t])) st.settings.disc[t] = [st.settings.disc[t]];
+  st.inm.forEach(i => { if (!i.pun) { i.pun = []; if (DISC_SANCTION[i.disc] && i.discUntil > curDay(st.t)) i.pun.push({ s: DISC_SANCTION[i.disc], disc: i.disc, until: i.discUntil }); } }); if (st.settings.escalate == null) st.settings.escalate = true; if (!st.settings.progChoice) st.settings.progChoice = 'inmate';
 }
 
 /* ================= Boot ================= */

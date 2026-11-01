@@ -466,7 +466,7 @@ function incident(i, type, desc, sev, b, positive, others = []) {
     if (b) b.incidents += { Minor: .5, Moderate: 1, Major: 2, Critical: 3 }[sev];
     if (sev === 'Minor' && type !== 'Medical emergency') { inc.status = 'Closed'; inc.action = 'Logged'; if (i.disc === 'Good') i.disc = 'Warning'; }
     else if (type === 'Medical emergency') { if (staffCount('Medical Staff', true)) { inc.status = 'Closed'; inc.action = 'Treated by medical staff'; } }
-    else if (S.settings.autoHandle === 'all' || (S.settings.autoHandle === 'moderate' && sev === 'Moderate')) { applySanction(inc, standardSanction(inc), true); }
+    else if (S.settings.autoHandle === 'all' || (S.settings.autoHandle === 'moderate' && sev === 'Moderate')) { applySanctions(inc, standardSanctions(inc), true); }
     if (inc.status === 'Open') note(sev === 'Critical' ? 'bad' : 'warn', `${sev} incident (${type}) in ${b ? b.name : 'facility'}: ${desc} Action required.`, sev === 'Critical');
   }
   ihist(i, `${positive ? 'Commendation' : 'Incident ' + inc.id}: ${type}${positive ? '' : ' (' + sev + ')'}.`);
@@ -503,42 +503,59 @@ const SANCTIONS = {
   'Refer for prosecution': { beh: -12, sent: [20, 90], d: 'Adds 20–90 days to sentence' },
   'Dismiss': { d: 'Close without sanction' }
 };
+const DISC_RANK = { Good: 0, Warning: 1, Restricted: 2, Confined: 3, Solitary: 4 };
+const DISC_SANCTION = { Restricted: 'Loss of privileges', Confined: 'Cell lockdown', Solitary: 'Solitary confinement' };
+function polList(t) { const p = S.settings.disc && S.settings.disc[t]; if (!p) return null; const l = Array.isArray(p) ? p : [p]; return l.filter(x => x && SANCTIONS[x.s]); }
+/* The list of punishments the policy gives this incident (several can be combined) */
+function standardSanctions(inc) { const l = polList(inc.type); if (l && l.length) return l.map(x => ({ s: x.s, days: x.days || 0 })); return [{ s: standardSanction(inc), days: 0 }]; }
+function applySanctions(inc, list, auto) {
+  if (!list || !list.length) list = [{ s: 'Verbal warning' }];
+  if (list.some(x => x.s === 'Dismiss')) list = [{ s: 'Dismiss' }];
+  inc._link = '';
+  const labels = list.map(x => applySanction(inc, x.s, x.days));
+  inc.status = 'Closed'; inc.action = labels.join(' + ') + (auto ? ' (auto)' : '') + (inc._link || ''); delete inc._link;
+}
+/* Recompute an inmate's disciplinary status from all punishments they are serving */
+function recomputeDisc(i) {
+  const d = curDay(); i.pun = (i.pun || []).filter(p => d < p.until);
+  if (i.pun.length) { const top = i.pun.reduce((a, p) => DISC_RANK[p.disc] > DISC_RANK[a.disc] ? p : a); i.disc = top.disc; i.discUntil = Math.max(...i.pun.map(p => p.until)); }
+  else if (DISC_RANK[i.disc] >= 2) { i.disc = d - i.lastInc < 14 ? 'Warning' : 'Good'; i.discUntil = d; }
+}
 function standardSanction(inc) {
-  const pol = S.settings.disc && S.settings.disc[inc.type]; if (pol && SANCTIONS[pol.s]) return pol.s;
   if (inc.type === 'Contraband') return 'Investigation';
   if (inc.type === 'Medical emergency') return 'Medical evaluation';
   if (inc.sev === 'Critical') return inc.type === 'Attempted escape' ? 'Refer for prosecution' : 'Solitary confinement';
   if (inc.sev === 'Major') return 'Solitary confinement';
   return 'Loss of privileges';
 }
-function sanctionDays(inc, s) {
+function sanctionDays(inc, s, days) {
   const X = SANCTIONS[s]; if (!X.dur) return 0;
-  const pol = S.settings.disc && S.settings.disc[inc.type];
-  let d = pol && pol.s === s && pol.days ? pol.days : X.days;
+  let d = days || X.days;
   if (S.settings.escalate && (inc.sev === 'Major' || inc.sev === 'Critical')) d *= 2;
   return d;
 }
-function applySanction(inc, s, auto, daysOverride) {
+function applySanction(inc, s, days) {
   const i = getInm(inc.who); const X = Object.assign({}, SANCTIONS[s]);
-  if (X.dur) X.days = daysOverride || sanctionDays(inc, s);
-  inc.status = 'Closed'; inc.action = s + (X.dur ? ` (${X.days}d)` : '') + (auto ? ' (auto)' : '');
-  if (!i) return;
+  if (X.dur) X.days = sanctionDays(inc, s, days);
+  const label = s + (X.dur ? ` (${X.days}d)` : '');
+  if (!i) return label;
   if (X.fine) { const a = Math.min(Math.max(0, i.bal), X.fine); if (a > 0) itx(i, `${s} for ${inc.id}`, -a); }
   if (X.job && i.job) setJob(i, null);
   if (X.psych && i.psych != null) i.psych = clamp(i.psych + X.psych);
   if (X.cost) money(-X.cost, s === 'Investigation' ? 'Security operations' : 'Healthcare', `${s} ${inc.id}`);
   if (X.beh) i.beh = clamp(i.beh + X.beh);
-  if (X.disc) { const rank = { Good: 0, Warning: 1, Restricted: 2, Confined: 3, Solitary: 4 }; if (rank[X.disc] >= rank[i.disc]) { i.disc = X.disc; i.discUntil = curDay() + X.days; } if (X.disc === 'Solitary') { if (i.job) setJob(i, null); } }
+  if (X.disc) { i.pun = i.pun || []; i.pun.push({ s, disc: X.disc, until: curDay() + X.days, inc: inc.id }); recomputeDisc(i); if (X.disc === 'Solitary' && i.job) setJob(i, null); }
   if (X.stress) i.n.stress = clamp(i.n.stress + X.stress);
   if (X.sent) { const add = ri(X.sent[0], X.sent[1]); i.release += add; i.parole += Math.round(add * PAROLE_FRAC[i.cls]); i.sent += add; ihist(i, `Sentence extended by ${add} days (prosecution).`); }
   if (s === 'Investigation') {
     const b = getBlock(inc.blk);
     if (b) b.contraband = clamp(b.contraband - 15);
-    if (i.gang && rnd() < .5) { const members = S.inm.filter(x => x.gang === i.gang && x.blk === i.blk); members.forEach(m => { m.beh = clamp(m.beh - 2); }); inc.action += ` — linked to ${i.gang}`; }
+    if (i.gang && rnd() < .5) { const members = S.inm.filter(x => x.gang === i.gang && x.blk === i.blk); members.forEach(m => { m.beh = clamp(m.beh - 2); }); inc._link = ` — linked to ${i.gang}`; }
   }
   if (s === 'Medical evaluation') { i.infirm = true; }
   if (s !== 'Dismiss') ihist(i, `Sanction for ${inc.id}: ${s}${X.dur ? ' for ' + X.days + ' days' : ''}.`);
   if (s === 'Dismiss') { i.beh = clamp(i.beh + 2); }
+  return label;
 }
 
 function dailySearches() {
@@ -638,7 +655,7 @@ function dayTick() {
 
   // --- Discipline expiry
   S.inm.forEach(i => {
-    if ((i.disc === 'Restricted' || i.disc === 'Confined' || i.disc === 'Solitary') && d >= i.discUntil) { ihist(i, `${i.disc} status ended.`); i.disc = d - i.lastInc < 14 ? 'Warning' : 'Good'; if (S.settings.autoJobs) tryAssignJob(i); }
+    if (i.pun && i.pun.length) { const ended = i.pun.filter(p => d >= p.until); if (ended.length) { ended.forEach(p => ihist(i, `${p.s} ended.`)); recomputeDisc(i); if (!i.pun.length && S.settings.autoJobs) tryAssignJob(i); } }
     else if (i.disc === 'Warning' && d - i.lastInc >= 14) i.disc = 'Good';
     // daily behaviour drift
     const sat = satisfaction(i); i.beh = clamp(i.beh + (sat - 50) / 60 + (i.job ? .2 : 0) + (i.prog ? .2 : 0) + (i.friends.length ? .1 : -.1));

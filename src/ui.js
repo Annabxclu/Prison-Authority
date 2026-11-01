@@ -226,7 +226,7 @@ function renderProfile(i, queued) {
       ${i.appeal && i.appeal.log.length ? `<h3 class="mt">Appeal record</h3>${i.appeal.log.map(x => `<div class="small">Day ${x.d}: ${esc(x.x)}</div>`).join('')}` : ''}</div>
       <div><h3>Security</h3><div class="kv">
       <div>Classification</div><div>${tag(i.cls)} ${CLS_LABEL[i.cls]}</div>${i.pc ? `<div>PC reason</div><div class="info">${esc(i.pc)}</div>` : ''}${i.dx ? `<div>Diagnosis</div><div class="info">${esc(i.dx)}</div><div>Psychiatric stability</div><div>${Math.round(i.psych)}/100 ${i.psych < 35 ? '<span class="bad">unstable</span>' : i.psych < 55 ? '<span class="warn">fragile</span>' : '<span class="good">stable</span>'}</div>` : ''}${i.pcRequest ? `<div>PC request</div><div class="warn">${esc(i.pcRequest.why)} (Day ${i.pcRequest.d})</div>` : ''}<div>Block / cell</div><div>${esc(cellLabel(i))}</div><div>Risk</div><div>${i.risk}</div>
-      <div>Behavior score</div><div>${Math.round(i.beh)}/100</div><div>Disciplinary</div><div>${i.disc}${i.discUntil > curDay() ? ` until Day ${i.discUntil}` : ''}</div>
+      <div>Behavior score</div><div>${Math.round(i.beh)}/100</div><div>Disciplinary</div><div style="white-space:normal">${i.disc}${(i.pun || []).length ? '<br>' + i.pun.map(p => `<span class="small">${p.s} until Day ${p.until}</span>`).join('<br>') : ''}</div>
       <div>Incidents</div><div>${i.incCount}</div><div>Personality</div><div>${i.traits.join(', ')}</div><div>Affiliation</div><div>${i.gang || 'None known'}</div></div>`;
     if (!queued) {
       const spots = [];
@@ -235,7 +235,7 @@ function renderProfile(i, queued) {
         <div class="field"><label class="f">Move to cell</label><div class="row">${spots.length ? sel('pMoveSel', '', [['', 'Choose a free bed…']].concat(spots.slice(0, 300))) : '<span class="small mut">No free beds in this classification.</span>'}</div></div>
         ${!['Protective', 'DeathRow', 'Insane'].includes(i.cls) && S.unlock.classes.includes('Protective') ? `<div class="field"><label class="f">Protective custody</label><div class="row">${btn('Transfer to protective custody', 'pcApprove', i.id, 'sm')}<span class="tiny dim">${freeBeds('Protective')} PC beds free</span></div></div>` : ''}
         <div class="field"><label class="f">Reclassify</label><div class="row">${sel('pReclass', i.cls, S.unlock.classes.map(c => [c, CLS_LABEL[c]]))}<span class="tiny dim">Moves to a free bed in the new classification.</span></div></div>
-        <div class="field"><label class="f">Disciplinary sanction</label><div class="row">${sel('pSanctionSel', UI.pSan || 'Verbal warning', Object.keys(SANCTIONS).filter(s => s !== 'Dismiss'))}${btn('Apply', 'pSanction', i.id, 'sm')}</div></div>`;
+        <div class="field"><label class="f">Disciplinary sanctions (add as many as you like)</label>${sanctionEditor('p:' + i.id)}<div class="row mt6">${btn('Apply punishments', 'pSanction', i.id, 'sm pri', !(UI.pS && UI.pS.id === i.id && UI.pS.list.length))}</div></div>`;
     }
     h += `</div></div>`;
     if (incs.length) h += `<h3 class="mt">Incident record</h3><div class="twrap"><table><tbody>${incs.slice(0, 12).map(x => `<tr><td class="mono small">${x.id}</td><td>${stamp(x.t)}</td><td>${x.type}</td><td>${x.sev === 'Positive' ? '<span class="good">Positive</span>' : sevTag(x.sev)}</td><td>${esc(x.action || 'Open')}</td></tr>`).join('')}</tbody></table></div>`;
@@ -269,7 +269,7 @@ A.ptab = t => { UI.profTab = t; openInmate(UI.prof); };
 C.pMoveSel = v => { if (!v) return; const i = getInm(UI.prof); const [bid, n] = v.split(':'); const b = getBlock(bid); const c = b && b.cells.find(c => c.n === +n); if (i && c && c.occ.length < c.beds) { place(i, b, c); ihist(i, `Moved to ${cellLabel(i)}.`); dirty(); toast('good', `${iname(i)} moved to ${cellLabel(i)}.`); } openInmate(UI.prof); };
 C.pReclass = v => { const i = getInm(UI.prof); if (!i || v === i.cls) return; if (v === 'DeathRow' || (i.cls === 'DeathRow' && !i.commuted)) { toast('bad', 'Death sentences are set by the courts — inmates cannot be moved on or off death row administratively.'); openInmate(UI.prof); return; } if (v === 'Insane' && i.psych == null) { i.psych = 40; i.dx = pick(INSANE_DX); } const spot = findBed(v); if (!spot) { toast('bad', `No free ${v} beds. Build or expand a ${v} block first.`); openInmate(UI.prof); return; } const old = i.cls; i.cls = v; place(i, spot.b, spot.c); i.parole = i.start + Math.ceil(i.sent * PAROLE_FRAC[v]); ihist(i, `Reclassified ${old} → ${v}. Moved to ${cellLabel(i)}.`); if (i.job && !jobEligible(i, i.job)) setJob(i, null); dirty(); openInmate(UI.prof); };
 C.pSanctionSel = v => { UI.pSan = v; };
-A.pSanction = id => { const i = getInm(id); if (!i) return; const s = UI.pSan || 'Verbal warning'; const inc = incident(i, 'Administrative sanction', `Sanction issued by administration: ${s}.`, 'Minor', getBlock(i.blk)); applySanction(inc, s); dirty(); toast('info', `${s} applied to ${iname(i)}.`); openInmate(id); };
+A.pSanction = id => { const i = getInm(id); if (!i || !UI.pS || UI.pS.id !== id || !UI.pS.list.length) return; const list = UI.pS.list; const names = list.map(x => x.s).join(' + '); const inc = incident(i, 'Administrative sanction', `Sanctions issued by administration: ${names}.`, 'Minor', getBlock(i.blk)); applySanctions(inc, list); UI.pS = null; dirty(); toast('info', `${names} applied to ${iname(i)}.`); openInmate(id); };
 C.pJob = v => { const i = getInm(UI.prof); if (!i) return; setJob(i, v || null); dirty(); openInmate(UI.prof); };
 C.pProg = v => { const i = getInm(UI.prof); if (!i) return; setProg(i, v || null); dirty(); openInmate(UI.prof); };
 
@@ -386,8 +386,8 @@ V.security = () => {
   let h = `<h1>Security</h1><p class="sub">Incidents are generated from inmate personality, needs, relationships, staffing and conditions. Moderate and higher incidents may need a disciplinary decision.</p>`;
   h += `<div class="card mb"><h3>Incidents awaiting action (${open.length})</h3>${open.length ? `<div class="twrap"><table><thead><tr><th>ID</th><th>When</th><th>Severity</th><th>Type</th><th>Inmate</th><th>Details</th><th>Decision</th></tr></thead><tbody>
     ${open.map(x => `<tr><td class="mono small">${x.id}</td><td class="small">${stamp(x.t)}</td><td>${sevTag(x.sev)}</td><td>${x.type}</td><td>${x.who ? inmLink(x.who, x.whoName) : '—'}</td><td style="white-space:normal;min-width:220px" class="small">${esc(x.desc)}</td>
-    <td><div class="row" style="flex-wrap:nowrap">${sel('incSel', UI['inc_' + x.id] || standardSanction(x), Object.keys(SANCTIONS), x.id)}${btn('Apply', 'incApply', x.id, 'sm pri')}</div></td></tr>`).join('')}</tbody></table></div>
-    <div class="row mt">${btn('Apply standard sanctions to all', 'incAll', null, 'sm')}<span class="tiny dim">${Object.entries(SANCTIONS).map(([k, v]) => `${k}: ${v.d}`).join(' · ')}</span></div>` : '<div class="alert good">No incidents awaiting action.</div>'}</div>`;
+    <td style="min-width:260px;white-space:normal">${sanctionEditor('inc:' + x.id)}<div class="mt6">${btn('Apply', 'incApply', x.id, 'sm pri')}</div></td></tr>`).join('')}</tbody></table></div>
+    <div class="row mt">${btn('Apply discipline policy to all', 'incAll', null, 'sm')}<span class="tiny dim">Punishments are pre-filled from the Discipline tab. Add or remove any before applying.</span></div>` : '<div class="alert good">No incidents awaiting action.</div>'}</div>`;
   const pcr = S.inm.filter(i => i.pcRequest);
   if (pcr.length) h += `<div class="card mb"><h3>Protective custody requests (${pcr.length})</h3><div class="twrap"><table><thead><tr><th>Inmate</th><th>Class</th><th>Reason</th><th class="right">Safety</th><th class="right">Rivals in block</th><th>Requested</th><th></th></tr></thead><tbody>
     ${pcr.map(i => `<tr><td>${inmLink(i.id, iname(i))} <span class="mono tiny dim">${i.id}</span></td><td>${tag(i.cls)}</td><td style="white-space:normal">${esc(i.pcRequest.why)}</td><td class="right mono">${Math.round(i.n.safety)}</td><td class="right mono">${i.rivals.filter(r => { const x = getInm(r); return x && x.blk === i.blk; }).length}</td><td>Day ${i.pcRequest.d}</td><td><div class="row" style="flex-wrap:nowrap">${btn('Approve transfer', 'pcApprove', i.id, 'sm pri')}${btn('Deny', 'pcDeny', i.id, 'sm')}</div></td></tr>`).join('')}</tbody></table></div>
@@ -416,9 +416,8 @@ V.security = () => {
 };
 A.pcApprove = id => { const i = getInm(id); if (!i) return; if (!S.unlock.classes.includes('Protective')) return toast('bad', 'Protective Custody is not unlocked yet.'); if (!transferToPC(i)) return toast('bad', 'No free Protective Custody beds. Build a PC unit in Housing.'); toast('good', `${iname(i)} moved to protective custody.`); dirty(); if (UI.prof) openInmate(id); else render(); };
 A.pcDeny = id => { const i = getInm(id); if (!i) return; i.pcRequest = null; i.n.stress = clamp(i.n.stress + 8); ihist(i, 'Protective custody request denied.'); dirty(); render(); };
-C.incSel = (v, el, id) => { UI['inc_' + id] = v; };
-A.incApply = id => { const x = S.inc.find(x => x.id === id); if (!x || x.status !== 'Open') return; const s = UI['inc_' + id] || standardSanction(x); applySanction(x, s); dirty(); toast('info', `${x.id}: ${s}.`); render(); };
-A.incAll = () => { S.inc.filter(x => x.status === 'Open').forEach(x => applySanction(x, standardSanction(x))); dirty(); render(); };
+A.incApply = id => { const x = S.inc.find(x => x.id === id); if (!x || x.status !== 'Open') return; applySanctions(x, sList('inc:' + id)); delete UI.incS[id]; dirty(); toast('info', `${x.id}: ${x.action}.`); render(true); };
+A.incAll = () => { S.inc.filter(x => x.status === 'Open').forEach(x => { applySanctions(x, UI.incS[x.id] || standardSanctions(x)); delete UI.incS[x.id]; }); dirty(); render(true); };
 A.autoOff = () => { autoAssignOfficers(); dirty(); render(); };
 
 /* ---------- Personnel ---------- */
@@ -809,23 +808,44 @@ V.discipline = () => {
   h += `<div class="card mb"><div class="row mb">
     <div><label class="f">Handle automatically</label>${seg('autoHandle', S.settings.autoHandle, [['minor', 'Minor only'], ['moderate', 'Minor + moderate'], ['all', 'All incidents']])}</div>
     <div>${chk('escalate', S.settings.escalate, 'Double the duration for Major and Critical incidents')}</div></div>
-    <div class="twrap"><table><thead><tr><th>Incident type</th><th class="right">Last 7 days</th><th class="right">Last 30 days</th><th>Punishment</th><th class="right">Duration (days)</th><th>What it does</th></tr></thead><tbody>
-    ${INC_TYPES.map(t => { const p = pol[t] || { s: 'Verbal warning', days: 0 }; const X = SANCTIONS[p.s] || {}; return `<tr><td><b>${t}</b></td><td class="right mono">${l7.filter(x => x.type === t).length}</td><td class="right mono">${l30.filter(x => x.type === t).length}</td>
-      <td>${sel('discS', p.s, Object.keys(SANCTIONS), t)}</td><td class="right">${X.dur ? num('discD', p.days || X.days, t, 1, 60, 1, 64) : '<span class="dim">—</span>'}</td><td class="small mut" style="white-space:normal;min-width:200px">${X.d || ''}</td></tr>`; }).join('')}
+    <div class="twrap"><table><thead><tr><th>Incident type</th><th class="right">Last 7 days</th><th class="right">Last 30 days</th><th>Punishments (days)</th></tr></thead><tbody>
+    ${INC_TYPES.map(t => `<tr><td><b>${t}</b></td><td class="right mono">${l7.filter(x => x.type === t).length}</td><td class="right mono">${l30.filter(x => x.type === t).length}</td>
+      <td style="white-space:normal;min-width:320px">${sanctionEditor('disc:' + t)}</td></tr>`).join('')}
     </tbody></table></div>
-    <div class="row mt">${btn('Reset to recommended', 'discReset', null, 'sm')}<span class="tiny dim">Minor incidents are always logged; punishments with a duration (${durS.join(', ')}) apply for the days you set.</span></div></div>`;
-  const now = S.inm.filter(i => i.disc === 'Restricted' || i.disc === 'Confined' || i.disc === 'Solitary');
+    <div class="tiny dim mt6" style="line-height:1.7">${Object.entries(SANCTIONS).map(([k, v]) => `<b>${k}</b>: ${v.d}`).join(' · ')}</div>
+    <div class="row mt">${btn('Reset to recommended', 'discReset', null, 'sm')}<span class="tiny dim">Combine as many punishments as you like. Those with a duration (${durS.join(', ')}) run at the same time, each on its own timer; the strictest one in force decides where the inmate spends the day.</span></div></div>`;
+  const now = S.inm.filter(i => (i.pun || []).length);
   h += `<div class="card"><h3>Currently serving punishments (${now.length})</h3>${tbl('serving', now, [
     { l: 'ID', v: i => i.id, h: i => `<span class="mono">${i.id}</span>` }, { l: 'Name', v: i => iname(i) }, { l: 'Class', v: i => i.cls, h: i => tag(i.cls) }, { l: 'Status', v: i => i.disc, h: i => `<span class="${i.disc === 'Solitary' ? 'bad' : 'warn'}">${i.disc}</span>` },
-    { l: 'Until', v: i => i.discUntil, h: i => 'Day ' + i.discUntil }, { l: 'Days left', v: i => i.discUntil - curDay(), r: 1 }, { l: '', v: () => '', ns: 1, q: false, h: i => btn('End early', 'discEnd', i.id, 'sm') }
+    { l: 'Punishments', v: i => i.pun.map(p => p.s).join(' '), h: i => `<div class="chips">${i.pun.map((p, k) => `<span class="chip">${p.s} · ${p.until - curDay()}d left<button class="x" title="End this punishment early" data-a="punEnd" data-arg="${i.id}|${k}">×</button></span>`).join('')}</div>` },
+    { l: 'Free on', v: i => i.discUntil, h: i => 'Day ' + i.discUntil }, { l: '', v: () => '', ns: 1, q: false, h: i => btn('End all early', 'discEnd', i.id, 'sm') }
   ], { row: 'inmate', rowArg: i => i.id, per: 15, empty: 'Nobody is currently being punished.' })}</div>`;
   return h;
 };
-C.discS = (v, el, t) => { const X = SANCTIONS[v]; S.settings.disc[t] = { s: v, days: X.dur ? (S.settings.disc[t] && S.settings.disc[t].days) || X.days : 0 }; dirty(); render(true); };
-C.discD = (v, el, t) => { S.settings.disc[t].days = clamp(parseInt(v) || 1, 1, 60); dirty(); };
 C.escalate = (v, el) => { S.settings.escalate = el.checked; dirty(); };
 A.discReset = () => { S.settings.disc = defaultDiscipline(); dirty(); render(true); };
-A.discEnd = id => { const i = getInm(id); if (!i) return; ihist(i, `${i.disc} ended early by administration.`); i.disc = 'Warning'; i.discUntil = curDay(); dirty(); render(true); };
+A.discEnd = id => { const i = getInm(id); if (!i) return; ihist(i, `All punishments ended early by administration.`); i.pun = []; recomputeDisc(i); dirty(); render(true); };
+A.punEnd = arg => { const [id, k] = arg.split('|'); const i = getInm(id); if (!i || !i.pun || !i.pun[+k]) return; ihist(i, `${i.pun[+k].s} ended early by administration.`); i.pun.splice(+k, 1); recomputeDisc(i); dirty(); render(true); };
+
+/* ---------- Multi-punishment editor (Discipline policy, Security decisions, inmate profile) ---------- */
+UI.incS = {};
+function sList(ctx) {
+  const [kind, key] = [ctx.slice(0, ctx.indexOf(':')), ctx.slice(ctx.indexOf(':') + 1)];
+  if (kind === 'disc') { let l = S.settings.disc[key]; if (!Array.isArray(l)) l = S.settings.disc[key] = l ? [l] : []; return l; }
+  if (kind === 'inc') { if (!UI.incS[key]) { const x = S.inc.find(x => x.id === key); UI.incS[key] = x ? standardSanctions(x) : []; } return UI.incS[key]; }
+  if (kind === 'p') { if (!UI.pS || UI.pS.id !== key) UI.pS = { id: key, list: [] }; return UI.pS.list; }
+  return [];
+}
+function sanctionEditor(ctx) {
+  const list = sList(ctx);
+  const avail = Object.keys(SANCTIONS).filter(s => !list.some(x => x.s === s));
+  return `<div class="chips">${list.map((x, k) => { const X = SANCTIONS[x.s] || {}; return `<span class="chip ${x.s === 'Dismiss' ? 'd' : ''}" title="${esc(X.d || '')}">${esc(x.s)}${X.dur ? ` ${num('sDays', x.days || X.days, ctx + '|' + k, 1, 60, 1)}d` : ''}<button class="x" data-a="sDel" data-arg="${esc(ctx + '|' + k)}" title="Remove">×</button></span>`; }).join('') || '<span class="tiny dim">No punishment</span>'}
+    ${sel('sAdd', '', [['', '+ Add punishment…']].concat(avail.map(s => [s, s])), ctx)}</div>`;
+}
+function sRefresh(ctx) { if (ctx.startsWith('disc:')) dirty(); if (ctx.startsWith('p:')) openInmate(UI.prof); else render(true); }
+C.sAdd = (v, el, ctx) => { if (!v) return; const l = sList(ctx); const X = SANCTIONS[v]; if (v === 'Dismiss') l.length = 0; else { const d = l.findIndex(x => x.s === 'Dismiss'); if (d >= 0) l.splice(d, 1); } l.push({ s: v, days: X.dur ? X.days : 0 }); sRefresh(ctx); };
+A.sDel = arg => { const k = +arg.slice(arg.lastIndexOf('|') + 1); const ctx = arg.slice(0, arg.lastIndexOf('|')); sList(ctx).splice(k, 1); sRefresh(ctx); };
+C.sDays = (v, el, arg) => { const k = +arg.slice(arg.lastIndexOf('|') + 1); const ctx = arg.slice(0, arg.lastIndexOf('|')); const x = sList(ctx)[k]; if (x) x.days = clamp(parseInt(v) || 1, 1, 60); if (ctx.startsWith('disc:')) dirty(); };
 
 /* ---------- Test mode ---------- */
 V.testing = () => {
