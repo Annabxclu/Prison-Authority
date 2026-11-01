@@ -1167,14 +1167,25 @@ function applySanction(inc, s, days) {
 function dailySearches() {
   const m = S.settings.searches; if (m === 'off') return;
   if (m === 'weekly' && dow() !== 0) return;
+  const results = []; let total = 0;
   S.blocks.filter(b => blockOcc(b)).forEach(b => {
-    const cost = blockOcc(b) * (m === 'daily' ? 2 : 4);
+    const cost = blockOcc(b) * (m === 'daily' ? 2 : 4); total += cost;
     accrue(cost, 'Security operations');
     const found = rnd() < b.contraband / 60;
+    const before = b.contraband;
     b.contraband = clamp(b.contraband - (m === 'daily' ? 6 : 18));
-    if (found) { const mates = S.inm.filter(i => i.blk === b.id); const i = pick(mates); if (i) { S.today.contraband++; incident(i, 'Contraband', `Cell search in ${b.name} found ${pick(['a mobile phone', 'a homemade weapon', 'narcotics', 'homemade alcohol', 'tobacco'])} in ${iname(i)}'s cell.`, 'Moderate', b); } }
+    let item = null;
+    if (found) { const mates = S.inm.filter(i => i.blk === b.id); const i = pick(mates); if (i) { item = pick(['a mobile phone', 'a homemade weapon', 'narcotics', 'homemade alcohol', 'tobacco']); S.today.contraband++; incident(i, 'Contraband', `Cell search in ${b.name} found ${item} in ${iname(i)}'s cell.`, 'Moderate', b); item += ` (${iname(i)})`; } }
+    results.push({ b: b.name, item, before: Math.round(before), after: Math.round(b.contraband) });
     S.inm.forEach(i => { if (i.blk === b.id) i.n.stress = clamp(i.n.stress + (m === 'daily' ? 1 : 2)); });
   });
+  if (!results.length) return;
+  const hits = results.filter(r => r.item);
+  S.lastSearch = { t: S.t, results, cost: total, kind: m };
+  const msg = `Cell search complete: ${results.length} block${results.length > 1 ? 's' : ''} searched (cost ${fmt$(total)}). ` +
+    (hits.length ? `Contraband found in ${hits.map(r => `${r.b}: ${r.item}`).join('; ')}.` : 'No contraband found.') +
+    ` Contraband levels now: ${results.map(r => `${r.b} ${r.after}`).join(', ')}.`;
+  note(hits.length ? 'warn' : 'good', msg, true);
 }
 function canteenSales() {
   const w = jobFilled('Canteen'); if (!w) return;
@@ -1922,7 +1933,8 @@ V.security = () => {
     <div class="field"><label class="f">Automatic handling with standard sanctions</label>${seg('autoHandle', S.settings.autoHandle, [['minor', 'Minor only'], ['moderate', 'Minor + moderate'], ['all', 'All incidents']])}</div>
     <div class="field"><label class="f">Cell searches (cost per inmate per search: $2 daily / $4 weekly)</label>${seg('searches', S.settings.searches, [['off', 'Off'], ['weekly', 'Weekly (Mon)'], ['daily', 'Daily']])}</div>
     <div class="field"><label class="f">Visitor screening</label>${seg('screening', S.settings.screening, [['none', 'Minimal'], ['standard', 'Standard'], ['strict', 'Strict']])}</div>
-    <p class="tiny dim">Searches reduce contraband (which raises incident risk) but add stress. Lockdowns can be set per block in Housing.</p></div>
+    <p class="tiny dim">Searches reduce contraband (which raises incident risk) but add stress. Lockdowns can be set per block in Housing.</p>
+    ${S.lastSearch ? `<div class="small mt6"><b>Last search:</b> ${stamp(S.lastSearch.t)} · ${fmt$(S.lastSearch.cost)}<br>${S.lastSearch.results.map(r => `${esc(r.b)}: ${r.item ? `<span class="warn">found ${esc(r.item)}</span>` : '<span class="good">clean</span>'} <span class="dim">(contraband ${r.before} → ${r.after})</span>`).join('<br>')}</div>` : `<div class="small mut mt6">No cell searches yet. ${S.settings.searches === 'weekly' ? 'Weekly searches run Mondays at 10:00.' : S.settings.searches === 'daily' ? 'Daily searches run at 10:00.' : ''}</div>`}</div>
     <div class="card"><h3>Last 7 days</h3>${(() => { const l = S.hist.slice(-7); const t = { Minor: 0, Moderate: 0, Major: 0, Critical: 0 }; l.forEach(x => { for (const k in t) t[k] += x.incidents[k]; }); return `<div class="grid g2">${Object.entries(t).map(([k, v]) => kpi(k, v, '', k === 'Critical' && v ? 'bad' : '')).join('')}</div><div class="small mut mt">Escapes: ${sum(l, x => x.escapes)} · Contraband finds: ${sum(l, x => x.contraband)} · Commendations: ${sum(l, x => x.positive)}</div>`; })()}</div></div>`;
   h += `<div class="card mb"><h3>Officer coverage by block (current shift: ${shift})</h3><div class="twrap"><table><thead><tr><th>Block</th><th>Class</th><th class="right">Inmates</th><th class="right">Day req/assigned</th><th class="right">Night req/assigned</th><th class="right">Coverage D / N</th><th>Status</th><th></th></tr></thead><tbody>
     ${S.blocks.filter(b => b.status !== 'Construction').map(b => `<tr><td>${esc(b.name)}</td><td>${tag(b.cls)}</td><td class="right mono">${blockOcc(b)}</td>

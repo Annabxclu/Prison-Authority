@@ -561,14 +561,25 @@ function applySanction(inc, s, days) {
 function dailySearches() {
   const m = S.settings.searches; if (m === 'off') return;
   if (m === 'weekly' && dow() !== 0) return;
+  const results = []; let total = 0;
   S.blocks.filter(b => blockOcc(b)).forEach(b => {
-    const cost = blockOcc(b) * (m === 'daily' ? 2 : 4);
+    const cost = blockOcc(b) * (m === 'daily' ? 2 : 4); total += cost;
     accrue(cost, 'Security operations');
     const found = rnd() < b.contraband / 60;
+    const before = b.contraband;
     b.contraband = clamp(b.contraband - (m === 'daily' ? 6 : 18));
-    if (found) { const mates = S.inm.filter(i => i.blk === b.id); const i = pick(mates); if (i) { S.today.contraband++; incident(i, 'Contraband', `Cell search in ${b.name} found ${pick(['a mobile phone', 'a homemade weapon', 'narcotics', 'homemade alcohol', 'tobacco'])} in ${iname(i)}'s cell.`, 'Moderate', b); } }
+    let item = null;
+    if (found) { const mates = S.inm.filter(i => i.blk === b.id); const i = pick(mates); if (i) { item = pick(['a mobile phone', 'a homemade weapon', 'narcotics', 'homemade alcohol', 'tobacco']); S.today.contraband++; incident(i, 'Contraband', `Cell search in ${b.name} found ${item} in ${iname(i)}'s cell.`, 'Moderate', b); item += ` (${iname(i)})`; } }
+    results.push({ b: b.name, item, before: Math.round(before), after: Math.round(b.contraband) });
     S.inm.forEach(i => { if (i.blk === b.id) i.n.stress = clamp(i.n.stress + (m === 'daily' ? 1 : 2)); });
   });
+  if (!results.length) return;
+  const hits = results.filter(r => r.item);
+  S.lastSearch = { t: S.t, results, cost: total, kind: m };
+  const msg = `Cell search complete: ${results.length} block${results.length > 1 ? 's' : ''} searched (cost ${fmt$(total)}). ` +
+    (hits.length ? `Contraband found in ${hits.map(r => `${r.b}: ${r.item}`).join('; ')}.` : 'No contraband found.') +
+    ` Contraband levels now: ${results.map(r => `${r.b} ${r.after}`).join(', ')}.`;
+  note(hits.length ? 'warn' : 'good', msg, true);
 }
 function canteenSales() {
   const w = jobFilled('Canteen'); if (!w) return;
