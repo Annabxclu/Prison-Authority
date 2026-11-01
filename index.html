@@ -2428,10 +2428,74 @@ const timeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(
 function encodeSave(st) { const j = JSON.stringify(st); return 'PMS1:' + btoa(unescape(encodeURIComponent(j))); }
 function decodeSave(code) { code = code.trim(); if (!code.startsWith('PMS1:')) throw new Error('Not a save code'); return JSON.parse(decodeURIComponent(escape(atob(code.slice(5))))); }
 
+/* ================= Firebase accounts (used outside Claude, e.g. GitHub Pages) ================= */
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyBfmX12kMUs0B4_DVfFRx-H6IzXF1ps964',
+  authDomain: 'prison-authority.firebaseapp.com',
+  projectId: 'prison-authority',
+  storageBucket: 'prison-authority.firebasestorage.app',
+  messagingSenderId: '720214245770',
+  appId: '1:720214245770:web:8bccb648283cf592124873'
+};
+const FB_VER = '12.17.1';
+const FB = { ok: false, failed: false, user: null, F: null, auth: null, db: null };
+async function fbLoad() {
+  const base = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
+  const [appM, authM, fsM] = await Promise.all([import(base + 'firebase-app.js'), import(base + 'firebase-auth.js'), import(base + 'firebase-firestore.js')]);
+  const app = appM.initializeApp(FIREBASE_CONFIG);
+  FB.F = Object.assign({}, authM, fsM); FB.auth = authM.getAuth(app); FB.db = fsM.getFirestore(app); FB.ok = true;
+  await new Promise(res => { let first = true; authM.onAuthStateChanged(FB.auth, u => { FB.user = u; if (first) { first = false; res(); } else onAuthChange(); }); });
+}
+function onAuthChange() {
+  Store.useAuth();
+  if (!S) showMenu();
+}
+/* Firestore adapter exposing the same small API the game uses for Claude storage */
+function fbCol(path) {
+  const F = FB.F, db = FB.db;
+  return {
+    doc(id) {
+      const r = F.doc(db, path + '/' + id);
+      return {
+        get: async () => { const s = await F.getDoc(r); return { exists: s.exists(), data: () => s.data() }; },
+        set: d => F.setDoc(r, d),
+        delete: () => F.deleteDoc(r),
+        acquire: ({ holder, ttlMs }) => F.runTransaction(db, async tx => {
+          const s = await tx.get(r); const now = Date.now();
+          if (s.exists() && s.data().holder !== holder && s.data().exp > now) return { acquired: false };
+          tx.set(r, { kind: 'lock', holder, exp: now + (ttlMs || 30000) }); return { acquired: true };
+        })
+      };
+    },
+    where(f, op, v) { return { get: async () => { const s = await F.getDocs(F.query(F.collection(db, path), F.where(f, op, v))); return { docs: s.docs.map(d => ({ data: () => d.data() })) }; } }; }
+  };
+}
+function fbErr(e) {
+  const c = (e && e.code) || '';
+  const m = {
+    'auth/invalid-credential': 'Wrong email or password.', 'auth/wrong-password': 'Wrong email or password.', 'auth/user-not-found': 'No account with that email.',
+    'auth/email-already-in-use': 'An account with that email already exists — try signing in.', 'auth/weak-password': 'Password must be at least 6 characters.',
+    'auth/invalid-email': 'That email address is not valid.', 'auth/missing-password': 'Enter a password.', 'auth/too-many-requests': 'Too many attempts. Wait a minute and try again.',
+    'auth/popup-closed-by-user': 'Google sign-in was closed before finishing.', 'auth/popup-blocked': 'Your browser blocked the Google sign-in window. Allow pop-ups and try again.',
+    'auth/unauthorized-domain': 'This website is not authorized in Firebase. Add it under Authentication → Settings → Authorized domains.',
+    'auth/operation-not-allowed': 'This sign-in method is turned off in Firebase (Authentication → Sign-in method).',
+    'permission-denied': 'Firebase refused access to your saves. Check the Firestore security rules.', 'auth/network-request-failed': 'Network error — check your connection.'
+  };
+  return m[c] || (e && e.message) || String(e);
+}
+
 const Store = {
   mode: 'none', db: null, uid: null, lastSaved: 0, saving: false, pending: false, tab: uid(), gens: {},
+  remote() { return this.mode === 'cloud' || this.mode === 'firebase'; },
+  localOK: false,
+  useAuth() {
+    this.gens = {};
+    if (FB.user) { this.mode = 'firebase'; this.uid = FB.user.uid; }
+    else { this.mode = this.localOK ? 'local' : 'none'; this.uid = null; }
+  },
   describe() {
-    return this.mode === 'cloud' ? 'Saved privately to your Claude account. Your prisons are available wherever you open this game while signed in.'
+    if (this.mode === 'firebase') return `Saved to your account (${FB.user.email || 'Google'}). Sign in on any device to continue your prisons.`;
+    return this.remote() ? 'Saved privately to your Claude account. Your prisons are available wherever you open this game while signed in.'
       : this.mode === 'local' ? 'Saved in this browser only (account saving is not available in this view). Use Export to move a prison to another device.'
         : 'Saving is not available in this view. Use Export save code to keep your progress.';
   },
@@ -2443,11 +2507,13 @@ const Store = {
         if (db && user) { const id = await timeout(user.id(), 10000); if (id) { this.db = db; this.uid = id; this.mode = 'cloud'; return; } }
       }
     } catch (e) { console.warn('cloud init failed', e); }
-    try { localStorage.setItem('__psim', '1'); localStorage.removeItem('__psim'); this.mode = 'local'; } catch (e) { this.mode = 'none'; }
+    try { localStorage.setItem('__psim', '1'); localStorage.removeItem('__psim'); this.localOK = true; } catch (e) { this.localOK = false; }
+    try { await Promise.race([fbLoad(), sleep(9000).then(() => { throw new Error('timeout'); })]); } catch (e) { console.warn('Firebase unavailable', e); FB.failed = true; FB.ok = false; }
+    this.useAuth();
   },
-  col() { return this.db.collection('data/users/' + this.uid); },
+  col() { return this.mode === 'firebase' ? fbCol('users/' + this.uid + '/data') : this.db.collection('data/users/' + this.uid); },
   async list() {
-    if (this.mode === 'cloud') { const q = await this.col().where('kind', '==', 'meta').get(); return q.docs.map(d => d.data()).sort((a, b) => b.updated - a.updated); }
+    if (this.remote()) { const q = await this.col().where('kind', '==', 'meta').get(); return q.docs.map(d => d.data()).sort((a, b) => b.updated - a.updated); }
     if (this.mode === 'local') { const out = []; for (let k = 0; k < localStorage.length; k++) { const key = localStorage.key(k); if (key.startsWith('psim_meta_')) { try { out.push(JSON.parse(localStorage.getItem(key))); } catch (e) { } } } return out.sort((a, b) => b.updated - a.updated); }
     return [];
   },
@@ -2458,10 +2524,10 @@ const Store = {
     this.saving = true; setSaveDot('saving');
     try {
       const json = JSON.stringify(st); const meta = this.meta(st);
-      if (this.mode === 'cloud') {
+      if (this.remote()) {
         const col = this.col(); const slot = st.id;
         let prev = this.gens[slot]; if (!prev) { const m = await col.doc('m-' + slot).get(); prev = m.exists ? m.data() : { gen: 1, n0: 0, n1: 0 }; }
-        const gen = (prev.gen + 1) % 2; const CH = 90000; const n = Math.ceil(json.length / CH);
+        const gen = (prev.gen + 1) % 2; const CH = this.mode === 'firebase' ? 400000 : 90000; const n = Math.ceil(json.length / CH);
         for (let i = 0; i < n; i++) await col.doc(`c-${slot}-g${gen}-${i}`).set({ kind: 'chunk', slot, gen, i, d: json.slice(i * CH, (i + 1) * CH) });
         meta.gen = gen; meta.chunks = n; meta.n0 = gen === 0 ? n : (prev.n0 || 0); meta.n1 = gen === 1 ? n : (prev.n1 || 0);
         const old = gen === 0 ? prev.n0 || 0 : prev.n1 || 0;
@@ -2476,14 +2542,14 @@ const Store = {
     } catch (e) {
       console.error(e); setSaveDot('err');
       if (e && e.code === 'quota_exceeded') toast('bad', 'Cloud storage is full. Delete an old prison or export this one.');
-      else toast('bad', 'Save failed: ' + (e && (e.message || e.code) || e));
+      else toast('bad', 'Save failed: ' + fbErr(e));
     } finally {
       this.saving = false;
       if (this.pending) { this.pending = false; setTimeout(() => this.save(S), 500); }
     }
   },
   async load(slot) {
-    if (this.mode === 'cloud') {
+    if (this.remote()) {
       const col = this.col(); const m = await col.doc('m-' + slot).get(); if (!m.exists) throw new Error('Save not found');
       const meta = m.data(); const parts = [];
       for (let i = 0; i < meta.chunks; i++) { const c = await col.doc(`c-${slot}-g${meta.gen}-${i}`).get(); if (!c.exists) throw new Error('Save data incomplete'); parts.push(c.data().d); }
@@ -2493,7 +2559,7 @@ const Store = {
     throw new Error('No storage');
   },
   async del(slot) {
-    if (this.mode === 'cloud') {
+    if (this.remote()) {
       const col = this.col(); const m = await col.doc('m-' + slot).get(); const meta = m.exists ? m.data() : { n0: 0, n1: 0 };
       await col.doc('m-' + slot).delete();
       for (const g of [0, 1]) for (let i = 0; i < (meta['n' + g] || meta.chunks || 0); i++) await col.doc(`c-${slot}-g${g}-${i}`).delete();
@@ -2507,8 +2573,8 @@ const Lock = {
   slot: null, lost: false, timer: null, bc: null,
   async take(slot) {
     this.slot = slot; this.lost = false;
-    if (Store.mode === 'cloud') {
-      try { const r = await Store.col().doc('lock-' + slot).acquire({ holder: Store.tab, ttlMs: 25000 }); if (!r.acquired) return false; }
+    if (Store.remote()) {
+      try { const r = await Store.col().doc('lock-' + slot).acquire({ holder: Store.tab, ttlMs: 45000 }); if (!r.acquired) return false; }
       catch (e) { console.warn('lock failed', e); }
     } else {
       try {
@@ -2518,19 +2584,19 @@ const Lock = {
       } catch (e) { }
     }
     clearInterval(this.timer);
-    this.timer = setInterval(() => this.renew(), 10000);
+    this.timer = setInterval(() => this.renew(), 20000);
     return true;
   },
   async renew() {
-    if (!this.slot || this.lost || Store.mode !== 'cloud') return;
-    try { const r = await Store.col().doc('lock-' + this.slot).acquire({ holder: Store.tab, ttlMs: 25000 }); if (!r.acquired) this.onLost(); } catch (e) { }
+    if (!this.slot || this.lost || !Store.remote()) return;
+    try { const r = await Store.col().doc('lock-' + this.slot).acquire({ holder: Store.tab, ttlMs: 45000 }); if (!r.acquired) this.onLost(); } catch (e) { }
   },
   onLost() { this.lost = true; setSpeed(0); showLockBanner(); },
   release() { clearInterval(this.timer); this.slot = null; this.lost = false; }
 };
 function showLockBanner() {
   const el = document.createElement('div'); el.className = 'lockbanner'; el.id = 'lockBanner';
-  el.innerHTML = `<div class="card" style="max-width:440px"><h2>Running elsewhere</h2><p class="mut">This prison is open in another tab or on another device. To prevent two simulations running at once, it is paused here.</p><div class="row">${btn('Try again', 'lockRetry', null, 'pri')}${btn('Back to menu', 'quitNoSave', null)}</div><p class="tiny dim mt">If you closed the other window, the hold is released within about 25 seconds.</p></div>`;
+  el.innerHTML = `<div class="card" style="max-width:440px"><h2>Running elsewhere</h2><p class="mut">This prison is open in another tab or on another device. To prevent two simulations running at once, it is paused here.</p><div class="row">${btn('Try again', 'lockRetry', null, 'pri')}${btn('Back to menu', 'quitNoSave', null)}</div><p class="tiny dim mt">If you closed the other window, the hold is released within about 45 seconds.</p></div>`;
   document.getElementById('lockBanner')?.remove(); document.body.appendChild(el);
 }
 A.lockRetry = async () => { const ok = await Lock.take(S.id); if (ok) { document.getElementById('lockBanner')?.remove(); toast('good', 'Control resumed in this window.'); try { const fresh = await Store.load(S.id); S = fresh; renderShell(); render(); } catch (e) { } } else toast('warn', 'Still open elsewhere. Try again shortly.'); };
@@ -2553,7 +2619,7 @@ setInterval(() => { if (S && UI.dirty && !Lock.lost && !$('#app').classList.cont
 document.addEventListener('visibilitychange', () => {
   if (!S || $('#app').classList.contains('hide')) return;
   if (document.hidden) { if (S.speed > 0) { hiddenPaused = S.speed; } Store.save(S); }
-  else { lastTick = performance.now(); if (Store.mode === 'cloud') Lock.renew(); }
+  else { lastTick = performance.now(); if (Store.remote()) Lock.renew(); }
 });
 window.addEventListener('pagehide', () => { if (S) Store.save(S); });
 function dirty() { UI.dirty = true; }
@@ -2660,7 +2726,8 @@ function renderMenu() {
   const g = UI.ng; const career = g.mode === 'career';
   const cbtn = (k, v, title, desc) => `<button class="${g[k] === v ? 'on' : ''}" data-a="seg" data-arg="ng_${k}|${v}"><b>${title}</b><span>${desc}</span></button>`;
   let h = `<div class="menuBox"><div class="hero"><div class="logo">PM</div><div><h1>Prison Management Simulator</h1><div class="mut">Run a correctional facility: intake, housing, staff, regimes, rehabilitation, parole and the budget.</div></div></div><div class="bars-deco"></div>`;
-  h += `<div class="card mb"><div class="spread"><h2>Your prisons</h2><span class="tiny dim">${Store.mode === 'cloud' ? 'Saved to your Claude account' : Store.mode === 'local' ? 'Saved in this browser' : ''}</span></div>`;
+  h += accountCard();
+  h += `<div class="card mb"><div class="spread"><h2>Your prisons</h2><span class="tiny dim">${Store.mode === 'cloud' ? 'Saved to your Claude account' : Store.mode === 'firebase' ? 'Saved to your account' : Store.mode === 'local' ? 'Saved in this browser' : ''}</span></div>`;
   if (SLOTS == null) h += '<div class="mut small">Loading saves…</div>';
   else if (!SLOTS.length) h += '<div class="mut small">No prisons yet. Create your first one below.</div>';
   else h += SLOTS.map(s => `<div class="slot"><div><b>${esc(s.name)}</b><div class="small mut">${modeLabel(s.mode)} · Day ${s.day} · ${s.pop}/${s.cap || '?'} inmates · ${fmt$(s.money)} · saved ${new Date(s.updated).toLocaleString()}</div></div><div class="row">${btn('Continue', 'loadSlot', s.slot, 'pri')}${btn('Delete', 'delSlot', s.slot, 'danger sm')}</div></div>`).join('');
@@ -2669,7 +2736,7 @@ function renderMenu() {
     <div class="field"><label class="f">Prison name</label><input type="text" data-c="ngName" value="${esc(g.name)}" style="width:100%" maxlength="40"></div>
     <div class="field"><label class="f">Game mode</label><div class="choice">${cbtn('mode', 'sandbox', 'Sandbox', 'Full freedom: choose size, funds and classifications. Everything unlocked.')}${cbtn('mode', 'career', 'Career', 'Start with a small Minimum/Medium prison and unlock facilities through objectives.')}${cbtn('mode', 'test', 'Test mode', 'Sandbox plus test tools: spawn inmates, trigger incidents, skip time, 100x speed.')}</div></div>
     ${career ? '<div class="alert info">Career starts as a Small prison (50 beds, Minimum + Medium) with $150,000.</div>' : `
-    <div class="field"><label class="f">Prison size</label><div class="choice">${cbtn('size', 'Small', 'Small', '50 beds')}${cbtn('size', 'Medium', 'Medium', '150 beds')}${cbtn('size', 'Large', 'Large', '300 beds')}</div></div>
+    <div class="field"><label class="f">Prison size</label><div class="choice">${['Small', 'Medium', 'Large'].map(z => cbtn('size', z, z, previewBeds(z, g.classes) + ' beds')).join('')}</div></div>
     <div class="field"><label class="f">Security classifications</label>${CLASSES.map(c => `<label class="chk"><input type="checkbox" data-c="ngCls" data-arg="${c}"${g.classes.includes(c) ? ' checked' : ''}> ${CLS_LABEL[c]}</label>`).join('')}</div>
     <div class="field"><label class="f">Starting funds</label>${g.mode === 'test' ? '<span class="small mut">$10,000,000 in test mode</span>' : ''}${g.mode === 'test' ? '' : seg('ng_funds', g.funds, [['250000', '$250k'], ['500000', '$500k'], ['1000000', '$1M'], ['5000000', '$5M']])}</div>`}
     <div class="grid g3"><div class="field"><label class="f">Population</label>${seg('ng_pop', g.pop, [['Male', 'Male'], ['Female', 'Female']])}</div>
@@ -2680,8 +2747,45 @@ function renderMenu() {
   h += `<p class="tiny dim center mt">Tip: press Space to pause/resume and keys 1–5 to change speed. At 1x, one real second is one in-game minute.</p></div>`;
   $('#menu').innerHTML = h;
 }
+function previewBeds(size, classes) {
+  const keep = S; let n = 0;
+  try { newState({ name: 'x', mode: 'sandbox', size, pop: 'Male', funds: 0, staff: 'none', classes: CLASSES.filter(c => classes.includes(c)), intake: {}, overflow: 'queue' }); n = totalCapacity(); } catch (e) { }
+  S = keep; return n;
+}
+function localSaves() { const out = []; try { for (let k = 0; k < localStorage.length; k++) { const key = localStorage.key(k); if (key.startsWith('psim_meta_')) { try { out.push(JSON.parse(localStorage.getItem(key))); } catch (e) { } } } } catch (e) { } return out; }
+function accountCard() {
+  if (Store.mode === 'cloud') return '';
+  if (!FB.ok) return FB.failed ? `<div class="card mb small mut">Account sign-in is unavailable right now (couldn't reach Firebase). Your prisons are saved in this browser.</div>` : '';
+  if (FB.user) {
+    const loc = localSaves();
+    return `<div class="card mb"><div class="spread"><div><b>Signed in</b> as ${esc(FB.user.email || FB.user.displayName || 'Google user')}<div class="small mut">Your prisons are saved to your account and available on any device.</div></div>${btn('Sign out', 'fbSignOut', null, 'sm')}</div>
+      ${loc.length ? `<div class="alert info mt">${loc.length} prison${loc.length > 1 ? 's are' : ' is'} saved only in this browser. ${btn(`Move ${loc.length > 1 ? 'them' : 'it'} to my account`, 'fbMove', null, 'sm pri')}</div>` : ''}</div>`;
+  }
+  return `<div class="card mb"><h2>Account</h2><p class="small mut" style="margin-top:0">Sign in to save your prisons online and play them on any device. Without an account, prisons are saved in this browser only.</p>
+    <div class="grid g2"><div class="field"><label class="f">Email</label><input type="text" id="fbEmail" autocomplete="email" inputmode="email" style="width:100%" value="${esc(UI.fbEmail || '')}"></div>
+    <div class="field"><label class="f">Password</label><input type="password" id="fbPass" autocomplete="current-password" style="width:100%;background:#0d1114;border:1px solid var(--line2);border-radius:6px;padding:6px 8px"></div></div>
+    <div class="row">${btn('Sign in', 'fbSignIn', null, 'pri')}${btn('Create account', 'fbSignUp')}${btn('Sign in with Google', 'fbGoogle')}<a data-a="fbReset" class="small" style="cursor:pointer">Forgot password?</a></div>
+    ${UI.fbMsg ? `<div class="alert ${UI.fbMsg[0]} mt">${esc(UI.fbMsg[1])}</div>` : ''}</div>`;
+}
+function fbCreds() { const e = ($('#fbEmail') || {}).value || ''; const p = ($('#fbPass') || {}).value || ''; UI.fbEmail = e.trim(); return [e.trim(), p]; }
+async function fbRun(fn, okMsg) { UI.fbMsg = ['info', 'Working…']; try { await fn(); UI.fbMsg = okMsg ? ['good', okMsg] : null; } catch (e) { console.warn(e); UI.fbMsg = ['bad', fbErr(e)]; } renderMenu(); }
+A.fbSignIn = () => { const [e, p] = fbCreds(); fbRun(() => FB.F.signInWithEmailAndPassword(FB.auth, e, p)); };
+A.fbSignUp = () => { const [e, p] = fbCreds(); fbRun(() => FB.F.createUserWithEmailAndPassword(FB.auth, e, p), null); };
+A.fbGoogle = () => fbRun(() => FB.F.signInWithPopup(FB.auth, new FB.F.GoogleAuthProvider()));
+A.fbReset = () => { const [e] = fbCreds(); if (!e) { UI.fbMsg = ['warn', 'Type your email above first, then click "Forgot password?".']; renderMenu(); return; } fbRun(() => FB.F.sendPasswordResetEmail(FB.auth, e), `Password reset email sent to ${e}.`); };
+A.fbSignOut = () => fbRun(() => FB.F.signOut(FB.auth));
+A.fbMove = async () => {
+  const loc = localSaves(); let n = 0;
+  UI.fbMsg = null; $('#menu').querySelector('[data-a=fbMove]').disabled = true;
+  for (const m of loc) {
+    try { const j = localStorage.getItem('psim_save_' + m.slot); if (!j) continue; await Store.save(JSON.parse(j)); localStorage.removeItem('psim_save_' + m.slot); localStorage.removeItem('psim_meta_' + m.slot); n++; }
+    catch (e) { toast('bad', `Couldn't move "${m.name}": ${fbErr(e)}`); }
+  }
+  toast('good', `${n} prison${n === 1 ? '' : 's'} moved to your account.`); showMenu();
+};
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target && e.target.id === 'fbPass') A.fbSignIn(); });
 C.ngName = v => { UI.ng.name = v; };
-C.ngCls = (v, el, c) => { const s = UI.ng.classes; if (el.checked) { if (!s.includes(c)) s.push(c); } else if (s.length > 1) UI.ng.classes = s.filter(x => x !== c); else el.checked = true; };
+C.ngCls = (v, el, c) => { const s = UI.ng.classes; if (el.checked) { if (!s.includes(c)) s.push(c); } else if (s.length > 1) UI.ng.classes = s.filter(x => x !== c); else el.checked = true;  renderMenu(); };
 A.startGame = async () => {
   const g = UI.ng; const career = g.mode === 'career';
   const size = career ? 'Small' : g.size;

@@ -8,7 +8,7 @@ A browser-based prison administration game. You run a correctional facility: inm
 
 **Offline:** download `index.html` and open it in any modern browser (Chrome, Edge, Firefox, Safari). No install needed.
 
-Your prisons are saved in your browser automatically. To move a prison to another device, use **Administration → Export save code**, then **Import save code** on the other device.
+**Accounts:** sign in (email/password or Google) on the main menu to save your prisons online and play them on any device. Without an account, prisons are saved in your browser automatically. To move a prison to another device, use **Administration → Export save code**, then **Import save code** on the other device.
 
 ## How to play
 
