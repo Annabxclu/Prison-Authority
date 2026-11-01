@@ -1535,6 +1535,53 @@ function commute(i) {
   if (spot) { i.cls = 'Maximum'; place(i, spot.b, spot.c); i.appeal.done = true; i.appeal = null; ihist(i, `Moved to ${cellLabel(i)}.`); }
   else { i.pendingMove = 'Maximum'; }
 }
+
+/* ---------- Moving & swapping inmates between cells/blocks ---------- */
+function rivalsIn(i, blkId, ignoreId) { return i.rivals.filter(r => { if (r === ignoreId) return false; const x = getInm(r); return x && x.blk === blkId; }).length; }
+function rivalNamesIn(i, blkId) { return i.rivals.map(getInm).filter(x => x && x.blk === blkId).map(iname); }
+function blockOptions(i) {
+  return S.blocks.filter(b => b.cls === i.cls && b.id !== i.blk && (b.status === 'Open' || b.status === 'Lockdown'))
+    .map(b => ({ b, free: blockCap(b) - blockOcc(b), rivals: rivalsIn(i, b.id) }));
+}
+function bestCellIn(i, b) {
+  // free bed, preferring a cell whose occupants are not rivals (and friends if possible)
+  const cells = b.cells.filter(c => c.occ.length < c.beds && !(b.id === i.blk && c.n === i.cell));
+  const score = c => c.occ.reduce((s, id) => s + (i.rivals.includes(id) ? 10 : 0) - (i.friends.includes(id) ? 2 : 0), 0) + c.occ.length * .1;
+  return cells.sort((x, y) => score(x) - score(y))[0] || null;
+}
+function moveInmate(i, b, c, why) {
+  const from = cellLabel(i); place(i, b, c);
+  ihist(i, `Moved from ${from} to ${cellLabel(i)}${why ? ' (' + why + ')' : ''}.`);
+}
+/* Swap candidates: same classification, different cell. Conflicts = rivals each would face in their new block. */
+function swapCandidates(i) {
+  return S.inm.filter(x => x.id !== i.id && x.cls === i.cls && x.blk && !(x.blk === i.blk && x.cell === i.cell) && !x.infirm && x.disc !== 'Solitary')
+    .map(x => ({ x, conflicts: rivalsIn(i, x.blk, x.id) + rivalsIn(x, i.blk, i.id), otherBlock: x.blk !== i.blk }))
+    .sort((a, b) => (a.conflicts - b.conflicts) || (b.otherBlock - a.otherBlock) || (a.x.n.safety - b.x.n.safety));
+}
+function swapInmates(a, b, why) {
+  const ca = cellOf(a), cb = cellOf(b); if (!ca || !cb) return false;
+  const la = cellLabel(a), lb = cellLabel(b);
+  ca.occ = ca.occ.filter(id => id !== a.id); cb.occ = cb.occ.filter(id => id !== b.id);
+  ca.occ.push(b.id); cb.occ.push(a.id);
+  [a.blk, a.cell, b.blk, b.cell] = [b.blk, b.cell, a.blk, a.cell];
+  ihist(a, `Swapped cells with ${iname(b)}: ${la} → ${cellLabel(a)}${why ? ' (' + why + ')' : ''}.`);
+  ihist(b, `Swapped cells with ${iname(a)}: ${lb} → ${cellLabel(b)}${why ? ' (' + why + ')' : ''}.`);
+  return true;
+}
+/* Resolve a safety concern by relocating within the same classification: free bed first, otherwise a conflict-free swap */
+function relocationPlan(i) {
+  const opts = blockOptions(i).filter(o => o.free > 0 && o.rivals === 0).sort((a, b) => b.free - a.free);
+  if (opts.length) return { kind: 'move', b: opts[0].b, text: `Move to ${opts[0].b.name} (${opts[0].free} free beds, no rivals)` };
+  const sw = swapCandidates(i).find(c => c.otherBlock && c.conflicts === 0);
+  if (sw) return { kind: 'swap', x: sw.x, text: `Swap with ${iname(sw.x)} in ${getBlock(sw.x.blk).name} (no rivals either way)` };
+  return null;
+}
+function relocate(i, plan, why) {
+  if (plan.kind === 'move') { const c = bestCellIn(i, plan.b); if (!c) return false; moveInmate(i, plan.b, c, why); }
+  else if (!swapInmates(i, plan.x, why)) return false;
+  return true;
+}
 /* ================= UI helpers ================= */
 const UI = { view: 'dashboard', modal: null, prof: null, profTab: 'Overview', repTab: 'Daily', dirty: false };
 const A = {}; // click actions
@@ -1766,10 +1813,15 @@ function renderProfile(i, queued) {
       <div>Behavior score</div><div>${Math.round(i.beh)}/100</div><div>Disciplinary</div><div style="white-space:normal">${i.disc}${(i.pun || []).length ? '<br>' + i.pun.map(p => `<span class="small">${p.s} until Day ${p.until}</span>`).join('<br>') : ''}</div>
       <div>Incidents</div><div>${i.incCount}</div><div>Personality</div><div>${i.traits.join(', ')}</div><div>Affiliation</div><div>${i.gang || 'None known'}</div></div>`;
     if (!queued) {
+      const here = rivalNamesIn(i, i.blk);
       const spots = [];
-      S.blocks.filter(b => b.cls === i.cls && (b.status === 'Open' || b.status === 'Lockdown')).forEach(b => b.cells.forEach(c => { if (c.occ.length < c.beds && !(b.id === i.blk && c.n === i.cell)) spots.push([b.id + ':' + c.n, `${b.name} · Cell ${c.n} (${c.occ.length}/${c.beds})`]); }));
+      S.blocks.filter(b => b.cls === i.cls && (b.status === 'Open' || b.status === 'Lockdown')).forEach(b => { const rv = rivalsIn(i, b.id); b.cells.forEach(c => { if (c.occ.length < c.beds && !(b.id === i.blk && c.n === i.cell)) spots.push([b.id + ':' + c.n, `${b.name} · Cell ${c.n} (${c.occ.length}/${c.beds})${b.id === i.blk ? ' · same block' : ''}${rv ? ` · ⚠ ${rv} rival${rv > 1 ? 's' : ''} in block` : ''}`]); }); });
+      const swaps = swapCandidates(i).slice(0, 150).map(o => [o.x.id, `${iname(o.x)} (${o.x.id}) · ${getBlock(o.x.blk).name} cell ${o.x.cell}${o.conflicts ? ` · ⚠ ${o.conflicts} rival conflict${o.conflicts > 1 ? 's' : ''}` : ' · no conflicts'}`]);
+      const plan = here.length ? relocationPlan(i) : null;
       h += `<h3 class="mt">Actions</h3>
-        <div class="field"><label class="f">Move to cell</label><div class="row">${spots.length ? sel('pMoveSel', '', [['', 'Choose a free bed…']].concat(spots.slice(0, 300))) : '<span class="small mut">No free beds in this classification.</span>'}</div></div>
+        ${here.length ? `<div class="alert warn" style="font-size:12px">Rivals in ${esc(getBlock(i.blk).name)}: ${here.map(esc).join(', ')}.${plan ? ` Suggested: ${esc(plan.text)}. ${btn('Do it', 'pRelocate', i.id, 'sm pri')}` : blockOptions(i).length ? ' No conflict-free move or swap is available right now.' : ` This is the only ${esc(CLS_LABEL[i.cls])} block — build a second one in Housing to separate rivals.`}</div>` : ''}
+        <div class="field"><label class="f">Move to another cell or block</label><div class="row">${spots.length ? sel('pMoveSel', '', [['', 'Choose a free bed…']].concat(spots.slice(0, 400))) : '<span class="small mut">No free beds in this classification — swap instead.</span>'}</div></div>
+        <div class="field"><label class="f">Swap cells with another inmate</label><div class="row">${swaps.length ? sel('pSwapSel', '', [['', 'Choose an inmate…']].concat(swaps)) : '<span class="small mut">No other inmates in this classification.</span>'}</div><div class="tiny dim mt6">Works even when every block is full. Best matches (no rival conflicts, different block) are listed first.</div></div>
         ${!['Protective', 'DeathRow', 'Insane'].includes(i.cls) && S.unlock.classes.includes('Protective') ? `<div class="field"><label class="f">Protective custody</label><div class="row">${btn('Transfer to protective custody', 'pcApprove', i.id, 'sm')}<span class="tiny dim">${freeBeds('Protective')} PC beds free</span></div></div>` : ''}
         <div class="field"><label class="f">Reclassify</label><div class="row">${sel('pReclass', i.cls, S.unlock.classes.map(c => [c, CLS_LABEL[c]]))}<span class="tiny dim">Moves to a free bed in the new classification.</span></div></div>
         <div class="field"><label class="f">Disciplinary sanctions (add as many as you like)</label>${sanctionEditor('p:' + i.id)}<div class="row mt6">${btn('Apply punishments', 'pSanction', i.id, 'sm pri', !(UI.pS && UI.pS.id === i.id && UI.pS.list.length))}</div></div>`;
@@ -1803,7 +1855,14 @@ function renderProfile(i, queued) {
 }
 A.inmate = id => { UI.profTab = 'Overview'; openInmate(id); };
 A.ptab = t => { UI.profTab = t; openInmate(UI.prof); };
-C.pMoveSel = v => { if (!v) return; const i = getInm(UI.prof); const [bid, n] = v.split(':'); const b = getBlock(bid); const c = b && b.cells.find(c => c.n === +n); if (i && c && c.occ.length < c.beds) { place(i, b, c); ihist(i, `Moved to ${cellLabel(i)}.`); dirty(); toast('good', `${iname(i)} moved to ${cellLabel(i)}.`); } openInmate(UI.prof); };
+C.pMoveSel = v => { if (!v) return; const i = getInm(UI.prof); const [bid, n] = v.split(':'); const b = getBlock(bid); const c = b && b.cells.find(c => c.n === +n); if (i && c && c.occ.length < c.beds) { moveInmate(i, b, c, 'administration'); afterRelocate(i); dirty(); toast('good', `${iname(i)} moved to ${cellLabel(i)}.`); } openInmate(UI.prof); };
+C.pSwapSel = v => { if (!v) return; const i = getInm(UI.prof), x = getInm(v); if (i && x && swapInmates(i, x, 'administration')) { afterRelocate(i); afterRelocate(x); dirty(); toast('good', `${iname(i)} and ${iname(x)} swapped cells.`); } openInmate(UI.prof); };
+A.pRelocate = id => { const i = getInm(id); const plan = i && relocationPlan(i); if (plan && relocate(i, plan, 'separated from rivals')) { if (plan.kind === 'swap') afterRelocate(plan.x); afterRelocate(i); dirty(); toast('good', `${iname(i)} relocated to ${cellLabel(i)}.`); } else toast('bad', 'No conflict-free move available.'); if (UI.prof) openInmate(id); else render(true); };
+/* After a move: if the inmate had asked for protective custody and is now away from rivals, the request is resolved */
+function afterRelocate(i) {
+  if (i.pcRequest && rivalsIn(i, i.blk) === 0) { i.pcRequest = null; i.n.safety = clamp(i.n.safety + 15); i.n.stress = clamp(i.n.stress - 10); ihist(i, 'Protective custody request withdrawn after being moved away from rivals.'); note('good', `${iname(i)} was moved to ${cellLabel(i)} and withdrew their protective custody request.`); }
+}
+A.pcMove = id => A.pRelocate(id);
 C.pReclass = v => { const i = getInm(UI.prof); if (!i || v === i.cls) return; if (v === 'DeathRow' || (i.cls === 'DeathRow' && !i.commuted)) { toast('bad', 'Death sentences are set by the courts — inmates cannot be moved on or off death row administratively.'); openInmate(UI.prof); return; } if (v === 'Insane' && i.psych == null) { i.psych = 40; i.dx = pick(INSANE_DX); } const spot = findBed(v); if (!spot) { toast('bad', `No free ${v} beds. Build or expand a ${v} block first.`); openInmate(UI.prof); return; } const old = i.cls; i.cls = v; place(i, spot.b, spot.c); i.parole = i.start + Math.ceil(i.sent * PAROLE_FRAC[v]); ihist(i, `Reclassified ${old} → ${v}. Moved to ${cellLabel(i)}.`); if (i.job && !jobEligible(i, i.job)) setJob(i, null); dirty(); openInmate(UI.prof); };
 C.pSanctionSel = v => { UI.pSan = v; };
 A.pSanction = id => { const i = getInm(id); if (!i || !UI.pS || UI.pS.id !== id || !UI.pS.list.length) return; const list = UI.pS.list; const names = list.map(x => x.s).join(' + '); const inc = incident(i, 'Administrative sanction', `Sanctions issued by administration: ${names}.`, 'Minor', getBlock(i.blk)); applySanctions(inc, list); UI.pS = null; dirty(); toast('info', `${names} applied to ${iname(i)}.`); openInmate(id); };
@@ -1927,8 +1986,8 @@ V.security = () => {
     <div class="row mt">${btn('Apply discipline policy to all', 'incAll', null, 'sm')}<span class="tiny dim">Punishments are pre-filled from the Discipline tab. Add or remove any before applying.</span></div>` : '<div class="alert good">No incidents awaiting action.</div>'}</div>`;
   const pcr = S.inm.filter(i => i.pcRequest);
   if (pcr.length) h += `<div class="card mb"><h3>Protective custody requests (${pcr.length})</h3><div class="twrap"><table><thead><tr><th>Inmate</th><th>Class</th><th>Reason</th><th class="right">Safety</th><th class="right">Rivals in block</th><th>Requested</th><th></th></tr></thead><tbody>
-    ${pcr.map(i => `<tr><td>${inmLink(i.id, iname(i))} <span class="mono tiny dim">${i.id}</span></td><td>${tag(i.cls)}</td><td style="white-space:normal">${esc(i.pcRequest.why)}</td><td class="right mono">${Math.round(i.n.safety)}</td><td class="right mono">${i.rivals.filter(r => { const x = getInm(r); return x && x.blk === i.blk; }).length}</td><td>Day ${i.pcRequest.d}</td><td><div class="row" style="flex-wrap:nowrap">${btn('Approve transfer', 'pcApprove', i.id, 'sm pri')}${btn('Deny', 'pcDeny', i.id, 'sm')}</div></td></tr>`).join('')}</tbody></table></div>
-    <p class="tiny dim mt6">${freeBeds('Protective')} protective custody beds free. Unanswered requests expire after 5 days, and the inmate's stress rises.</p></div>`;
+    ${pcr.map(i => `<tr><td>${inmLink(i.id, iname(i))} <span class="mono tiny dim">${i.id}</span></td><td>${tag(i.cls)}</td><td style="white-space:normal">${esc(i.pcRequest.why)}</td><td class="right mono">${Math.round(i.n.safety)}</td><td class="right mono">${i.rivals.filter(r => { const x = getInm(r); return x && x.blk === i.blk; }).length}</td><td>Day ${i.pcRequest.d}</td><td>${(() => { const plan = rivalsIn(i, i.blk) ? relocationPlan(i) : null; return `<div class="row" style="flex-wrap:nowrap">${plan ? btn('Move to another block', 'pcMove', i.id, 'sm pri') : ''}${btn('Approve PC transfer', 'pcApprove', i.id, 'sm' + (plan ? '' : ' pri'))}${btn('Deny', 'pcDeny', i.id, 'sm')}</div>${plan ? `<div class="tiny dim mt6">${esc(plan.text)}</div>` : rivalsIn(i, i.blk) ? `<div class="tiny dim mt6">${blockOptions(i).length ? 'No conflict-free move or swap available — open their profile to choose one manually.' : `Only one ${esc(CLS_LABEL[i.cls])} block — build another to separate rivals.`}</div>` : ''}`; })()}</td></tr>`).join('')}</tbody></table></div>
+    <p class="tiny dim mt6">If the threat comes from rivals in the same block, moving them to another block (or swapping cells with someone there) usually solves it without protective custody. ${freeBeds('Protective')} protective custody beds free. Unanswered requests expire after 5 days, and the inmate's stress rises.</p></div>`;
   h += `<div class="grid g2 mb"><div class="card"><h3>Security policies</h3>
     <div class="field"><label class="f">Automatic handling with standard sanctions</label>${seg('autoHandle', S.settings.autoHandle, [['minor', 'Minor only'], ['moderate', 'Minor + moderate'], ['all', 'All incidents']])}</div>
     <div class="field"><label class="f">Cell searches (cost per inmate per search: $2 daily / $4 weekly)</label>${seg('searches', S.settings.searches, [['off', 'Off'], ['weekly', 'Weekly (Mon)'], ['daily', 'Daily']])}</div>

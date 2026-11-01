@@ -929,3 +929,50 @@ function commute(i) {
   if (spot) { i.cls = 'Maximum'; place(i, spot.b, spot.c); i.appeal.done = true; i.appeal = null; ihist(i, `Moved to ${cellLabel(i)}.`); }
   else { i.pendingMove = 'Maximum'; }
 }
+
+/* ---------- Moving & swapping inmates between cells/blocks ---------- */
+function rivalsIn(i, blkId, ignoreId) { return i.rivals.filter(r => { if (r === ignoreId) return false; const x = getInm(r); return x && x.blk === blkId; }).length; }
+function rivalNamesIn(i, blkId) { return i.rivals.map(getInm).filter(x => x && x.blk === blkId).map(iname); }
+function blockOptions(i) {
+  return S.blocks.filter(b => b.cls === i.cls && b.id !== i.blk && (b.status === 'Open' || b.status === 'Lockdown'))
+    .map(b => ({ b, free: blockCap(b) - blockOcc(b), rivals: rivalsIn(i, b.id) }));
+}
+function bestCellIn(i, b) {
+  // free bed, preferring a cell whose occupants are not rivals (and friends if possible)
+  const cells = b.cells.filter(c => c.occ.length < c.beds && !(b.id === i.blk && c.n === i.cell));
+  const score = c => c.occ.reduce((s, id) => s + (i.rivals.includes(id) ? 10 : 0) - (i.friends.includes(id) ? 2 : 0), 0) + c.occ.length * .1;
+  return cells.sort((x, y) => score(x) - score(y))[0] || null;
+}
+function moveInmate(i, b, c, why) {
+  const from = cellLabel(i); place(i, b, c);
+  ihist(i, `Moved from ${from} to ${cellLabel(i)}${why ? ' (' + why + ')' : ''}.`);
+}
+/* Swap candidates: same classification, different cell. Conflicts = rivals each would face in their new block. */
+function swapCandidates(i) {
+  return S.inm.filter(x => x.id !== i.id && x.cls === i.cls && x.blk && !(x.blk === i.blk && x.cell === i.cell) && !x.infirm && x.disc !== 'Solitary')
+    .map(x => ({ x, conflicts: rivalsIn(i, x.blk, x.id) + rivalsIn(x, i.blk, i.id), otherBlock: x.blk !== i.blk }))
+    .sort((a, b) => (a.conflicts - b.conflicts) || (b.otherBlock - a.otherBlock) || (a.x.n.safety - b.x.n.safety));
+}
+function swapInmates(a, b, why) {
+  const ca = cellOf(a), cb = cellOf(b); if (!ca || !cb) return false;
+  const la = cellLabel(a), lb = cellLabel(b);
+  ca.occ = ca.occ.filter(id => id !== a.id); cb.occ = cb.occ.filter(id => id !== b.id);
+  ca.occ.push(b.id); cb.occ.push(a.id);
+  [a.blk, a.cell, b.blk, b.cell] = [b.blk, b.cell, a.blk, a.cell];
+  ihist(a, `Swapped cells with ${iname(b)}: ${la} → ${cellLabel(a)}${why ? ' (' + why + ')' : ''}.`);
+  ihist(b, `Swapped cells with ${iname(a)}: ${lb} → ${cellLabel(b)}${why ? ' (' + why + ')' : ''}.`);
+  return true;
+}
+/* Resolve a safety concern by relocating within the same classification: free bed first, otherwise a conflict-free swap */
+function relocationPlan(i) {
+  const opts = blockOptions(i).filter(o => o.free > 0 && o.rivals === 0).sort((a, b) => b.free - a.free);
+  if (opts.length) return { kind: 'move', b: opts[0].b, text: `Move to ${opts[0].b.name} (${opts[0].free} free beds, no rivals)` };
+  const sw = swapCandidates(i).find(c => c.otherBlock && c.conflicts === 0);
+  if (sw) return { kind: 'swap', x: sw.x, text: `Swap with ${iname(sw.x)} in ${getBlock(sw.x.blk).name} (no rivals either way)` };
+  return null;
+}
+function relocate(i, plan, why) {
+  if (plan.kind === 'move') { const c = bestCellIn(i, plan.b); if (!c) return false; moveInmate(i, plan.b, c, why); }
+  else if (!swapInmates(i, plan.x, why)) return false;
+  return true;
+}
