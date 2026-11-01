@@ -218,7 +218,7 @@ function affinity(a, b) {
 }
 function dailyRelationships() {
   const byBlock = {};
-  S.inm.forEach(i => { if (i.blk && i.disc !== 'Solitary' && !i.infirm) (byBlock[i.blk] = byBlock[i.blk] || []).push(i); });
+  S.inm.forEach(i => { if (i.blk && i.disc !== 'Solitary' && i.disc !== 'Confined' && !i.infirm) (byBlock[i.blk] = byBlock[i.blk] || []).push(i); });
   for (const bid in byBlock) {
     const list = byBlock[bid]; if (list.length < 2) continue;
     const n = Math.ceil(list.length * .25);
@@ -247,6 +247,7 @@ function effectiveAct(i, act, b, cov) {
   if (b.status === 'Lockdown' && !['Sleep', 'Meal', 'Wake'].includes(act)) return 'Lockdown';
   if (act === 'Visits' && !S.settings.visitDays[dow()]) act = 'Free';
   if (act === 'Yard' && S.weather === 'Storm') act = 'Recreation';
+  if (i.disc === 'Confined' && !['Sleep', 'Wake', 'Meal', 'Shower'].includes(act)) return 'Confined';
   if (i.disc === 'Restricted' && ['Recreation', 'Yard', 'Free', 'Visits'].includes(act)) return 'Lockdown';
   if (cov < .5 && ['Recreation', 'Yard', 'Free', 'Visits', 'Work', 'Rehab'].includes(act)) { hourFlags.cancel = hourFlags.cancel || {}; hourFlags.cancel[b.id] = true; return 'Lockdown'; }
   if (act === 'Work' && !i.job) return 'Idle';
@@ -294,7 +295,7 @@ function hourTick(h) {
     const c = cov[b.id] == null ? 1 : cov[b.id];
     let act = effectiveAct(i, S.sched[i.cls][h], b, c);
     if (act === 'Yard') { if (yardUsed >= yardCap) { act = 'Lockdown'; hourFlags.yardFull = (hourFlags.yardFull || 0) + 1; } else { yardUsed++; (i.cls === 'Protective' ? yardPC : yardGP).push(i); } }
-    i.loc = i.disc === 'Solitary' ? 'Solitary confinement' : (LOC[act] || act);
+    i.loc = i.disc === 'Solitary' ? 'Solitary confinement' : i.disc === 'Confined' && act !== 'Shower' ? 'Cell (confined)' : (LOC[act] || act);
     const n = i.n;
     // base decay
     const asleep = act === 'Sleep';
@@ -332,6 +333,7 @@ function hourTick(h) {
         break;
       case 'Sleep': n.stress -= 1.2; n.health += .25; break;
       case 'Lockdown': n.stress += 1.2; n.rec -= 1; break;
+      case 'Confined': n.stress += 1.2; n.rec -= 1.2; n.social -= .5; break;
       case 'Solitary': n.stress += 2.2; n.social -= 2.5; n.rec -= 1.5; break;
       case 'Idle': n.rec -= .5; n.stress += .3; break;
       case 'Infirmary':
@@ -392,7 +394,7 @@ function rollIncident(i, b, cov, act, rivalsHere) {
   p *= 1 + Math.max(0, 1 - cov) * 2.5;
   p *= 1.7 - i.beh / 100;
   p *= CLS_MULT[i.cls];
-  p *= { Yard: 1.6, Recreation: 1.4, Free: 1.4, Meal: 1.25, Work: .8, Rehab: .6, Lockdown: .5, Solitary: .15, Visits: 1.1, Shower: 1.1, Idle: 1.2, Wake: .8 }[act] || 1;
+  p *= { Yard: 1.6, Recreation: 1.4, Free: 1.4, Meal: 1.25, Work: .8, Rehab: .6, Lockdown: .5, Confined: .4, Solitary: .15, Visits: 1.1, Shower: 1.1, Idle: 1.2, Wake: .8 }[act] || 1;
   p *= 1 + rivalsHere * .3 + b.contraband / 120;
   if (i.disc === 'Solitary') p *= .3;
   if (i.cls === 'Insane') p *= 1 + Math.max(0, 55 - (i.psych || 50)) / 10;
@@ -426,7 +428,7 @@ function makeIncident(i, b, type, cov) {
   let sev = 'Minor', desc = '', others = [];
   // Only inmates physically present with this inmate right now can be involved. Inmates in solitary or the infirmary are isolated.
   const isolated = i.disc === 'Solitary' || i.infirm;
-  const mates = isolated ? [] : S.inm.filter(x => x.id !== i.id && x.disc !== 'Solitary' && !x.infirm && x.loc === i.loc && (x.blk === b.id || /yard|Dining|Program|Work|Visitation/i.test(i.loc)));
+  const mates = isolated ? [] : i.disc === 'Confined' ? S.inm.filter(x => x.id !== i.id && x.blk === i.blk && x.cell === i.cell && /^Cell/.test(x.loc) && x.disc !== 'Solitary') : S.inm.filter(x => x.id !== i.id && x.disc !== 'Solitary' && x.disc !== 'Confined' && !x.infirm && x.loc === i.loc && (x.blk === b.id || /yard|Dining|Program|Work|Visitation/i.test(i.loc)));
   if (!mates.length && type === 'Fight') type = 'Assault on staff';
   switch (type) {
     case 'Argument': {
@@ -493,6 +495,7 @@ const SANCTIONS = {
   'Restitution': { beh: -3, fine: 60, d: 'Inmate pays up to $60 toward damages' },
   'Loss of job': { beh: -4, job: true, d: 'Removed from work assignment' },
   'Loss of privileges': { beh: -5, days: 3, dur: true, disc: 'Restricted', d: 'No yard, recreation, free time or visits' },
+  'Cell lockdown': { beh: -6, days: 3, dur: true, disc: 'Confined', stress: 6, d: 'Confined to own cell all day: meals in cell, no work, programs, yard, recreation or visits' },
   'Solitary confinement': { beh: -8, days: 5, dur: true, disc: 'Solitary', stress: 15, d: 'Held in segregation' },
   'Psychiatric observation': { beh: 0, days: 2, dur: true, disc: 'Restricted', psych: 18, cost: 200, d: 'Observation and medication review (helps unstable inmates)' },
   'Investigation': { cost: 300, d: 'Officers investigate: may uncover contraband and gang activity' },
@@ -525,7 +528,7 @@ function applySanction(inc, s, auto, daysOverride) {
   if (X.psych && i.psych != null) i.psych = clamp(i.psych + X.psych);
   if (X.cost) money(-X.cost, s === 'Investigation' ? 'Security operations' : 'Healthcare', `${s} ${inc.id}`);
   if (X.beh) i.beh = clamp(i.beh + X.beh);
-  if (X.disc) { const rank = { Good: 0, Warning: 1, Restricted: 2, Solitary: 3 }; if (rank[X.disc] >= rank[i.disc]) { i.disc = X.disc; i.discUntil = curDay() + X.days; } if (X.disc === 'Solitary') { if (i.job) setJob(i, null); } }
+  if (X.disc) { const rank = { Good: 0, Warning: 1, Restricted: 2, Confined: 3, Solitary: 4 }; if (rank[X.disc] >= rank[i.disc]) { i.disc = X.disc; i.discUntil = curDay() + X.days; } if (X.disc === 'Solitary') { if (i.job) setJob(i, null); } }
   if (X.stress) i.n.stress = clamp(i.n.stress + X.stress);
   if (X.sent) { const add = ri(X.sent[0], X.sent[1]); i.release += add; i.parole += Math.round(add * PAROLE_FRAC[i.cls]); i.sent += add; ihist(i, `Sentence extended by ${add} days (prosecution).`); }
   if (s === 'Investigation') {
@@ -562,7 +565,7 @@ function paroleScore(i) {
   const recent = S.inc.filter(x => x.who === i.id && x.sev !== 'Minor' && x.status !== 'Recorded' && curDay(x.t) > curDay() - 30).length;
   let s = 40 + (i.beh - 50) * .6 + i.paroleRec - recent * 12 - i.sev * 4 - i.priors * 2;
   if (i.job) s += 6 + Math.min(8, (curDay() - i.jobSince) / 5);
-  if (i.disc === 'Solitary') s -= 20; else if (i.disc === 'Restricted') s -= 10;
+  if (i.disc === 'Solitary') s -= 20; else if (i.disc === 'Confined') s -= 14; else if (i.disc === 'Restricted') s -= 10;
   s += i.recommend || 0;
   if (i.cls === 'Insane') s += ((i.psych || 0) - 55) * .5;
   return Math.round(clamp(s, 0, 100));
@@ -635,7 +638,7 @@ function dayTick() {
 
   // --- Discipline expiry
   S.inm.forEach(i => {
-    if ((i.disc === 'Restricted' || i.disc === 'Solitary') && d >= i.discUntil) { ihist(i, `${i.disc} status ended.`); i.disc = d - i.lastInc < 14 ? 'Warning' : 'Good'; if (S.settings.autoJobs) tryAssignJob(i); }
+    if ((i.disc === 'Restricted' || i.disc === 'Confined' || i.disc === 'Solitary') && d >= i.discUntil) { ihist(i, `${i.disc} status ended.`); i.disc = d - i.lastInc < 14 ? 'Warning' : 'Good'; if (S.settings.autoJobs) tryAssignJob(i); }
     else if (i.disc === 'Warning' && d - i.lastInc >= 14) i.disc = 'Good';
     // daily behaviour drift
     const sat = satisfaction(i); i.beh = clamp(i.beh + (sat - 50) / 60 + (i.job ? .2 : 0) + (i.prog ? .2 : 0) + (i.friends.length ? .1 : -.1));

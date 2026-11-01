@@ -179,7 +179,7 @@ V.inmates = () => {
     { l: 'Location', v: i => i.loc },
     { l: 'Risk', v: i => i.risk, s: i => ['Low', 'Moderate', 'High', 'Extreme'].indexOf(i.risk), h: i => `<span class="${i.risk === 'Extreme' ? 'bad' : i.risk === 'High' ? 'warn' : ''}">${i.risk}</span>` },
     { l: 'Behavior', v: i => Math.round(i.beh), h: i => `<div class="row" style="gap:6px;flex-wrap:nowrap">${bar(i.beh)}<span class="mono small">${Math.round(i.beh)}</span></div>` },
-    { l: 'Status', v: i => i.infirm ? 'Infirmary' : i.disc, h: i => i.infirm ? '<span class="info">Infirmary</span>' : `<span class="${i.disc === 'Solitary' ? 'bad' : i.disc === 'Restricted' ? 'warn' : i.disc === 'Warning' ? 'mut' : 'good'}">${i.disc}</span>` },
+    { l: 'Status', v: i => i.infirm ? 'Infirmary' : i.disc, h: i => i.infirm ? '<span class="info">Infirmary</span>' : `<span class="${i.disc === 'Solitary' ? 'bad' : i.disc === 'Confined' ? 'warn' : i.disc === 'Restricted' ? 'warn' : i.disc === 'Warning' ? 'mut' : 'good'}">${i.disc}</span>` },
     { l: 'Job', v: i => i.job || '—' },
     { l: 'Program', v: i => i.prog || '—' },
     { l: 'Days left', v: i => remaining(i), r: 1, h: i => i.cls === 'DeathRow' && !i.commuted ? '<span class="bad">Death</span>' : `<span class="mono">${remaining(i)}</span>` },
@@ -190,7 +190,7 @@ V.inmates = () => {
       row: 'inmate', rowArg: i => i.id, sort: 0, empty: 'No inmates yet. Start the clock — intake runs daily at 08:00.',
       filters: [
         { l: 'Class', opts: CLASSES, fn: (i, v) => i.cls === v },
-        { l: 'Status', opts: ['Good', 'Warning', 'Restricted', 'Solitary', 'Infirmary', 'Hearing due'], fn: (i, v) => v === 'Infirmary' ? i.infirm : v === 'Hearing due' ? !!i.hearing : i.disc === v },
+        { l: 'Status', opts: ['Good', 'Warning', 'Restricted', 'Confined', 'Solitary', 'Infirmary', 'Hearing due'], fn: (i, v) => v === 'Infirmary' ? i.infirm : v === 'Hearing due' ? !!i.hearing : i.disc === v },
         { l: 'Work', opts: ['Employed', 'Unemployed', 'In a program', 'Idle'], fn: (i, v) => v === 'Employed' ? !!i.job : v === 'Unemployed' ? !i.job : v === 'In a program' ? !!i.prog : !i.job && !i.prog },
         { l: 'Block', opts: S.blocks.map(b => b.name), fn: (i, v) => { const b = getBlock(i.blk); return b && b.name === v; } }
       ]
@@ -814,7 +814,7 @@ V.discipline = () => {
       <td>${sel('discS', p.s, Object.keys(SANCTIONS), t)}</td><td class="right">${X.dur ? num('discD', p.days || X.days, t, 1, 60, 1, 64) : '<span class="dim">—</span>'}</td><td class="small mut" style="white-space:normal;min-width:200px">${X.d || ''}</td></tr>`; }).join('')}
     </tbody></table></div>
     <div class="row mt">${btn('Reset to recommended', 'discReset', null, 'sm')}<span class="tiny dim">Minor incidents are always logged; punishments with a duration (${durS.join(', ')}) apply for the days you set.</span></div></div>`;
-  const now = S.inm.filter(i => i.disc === 'Restricted' || i.disc === 'Solitary');
+  const now = S.inm.filter(i => i.disc === 'Restricted' || i.disc === 'Confined' || i.disc === 'Solitary');
   h += `<div class="card"><h3>Currently serving punishments (${now.length})</h3>${tbl('serving', now, [
     { l: 'ID', v: i => i.id, h: i => `<span class="mono">${i.id}</span>` }, { l: 'Name', v: i => iname(i) }, { l: 'Class', v: i => i.cls, h: i => tag(i.cls) }, { l: 'Status', v: i => i.disc, h: i => `<span class="${i.disc === 'Solitary' ? 'bad' : 'warn'}">${i.disc}</span>` },
     { l: 'Until', v: i => i.discUntil, h: i => 'Day ' + i.discUntil }, { l: 'Days left', v: i => i.discUntil - curDay(), r: 1 }, { l: '', v: () => '', ns: 1, q: false, h: i => btn('End early', 'discEnd', i.id, 'sm') }
