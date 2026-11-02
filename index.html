@@ -1637,10 +1637,14 @@ function tblBody(id) {
     <button class="btn sm" data-tp="${id}|-1"${st.page === 0 ? ' disabled' : ''}>‹ Prev</button><button class="btn sm" data-tp="${id}|1"${st.page >= pages - 1 ? ' disabled' : ''}>Next ›</button></div>`;
   return h;
 }
-function rerenderTable(id) { const el = document.getElementById('tb-' + id); if (el && TDEF[id]) el.innerHTML = tblBody(id); }
+/* Remember and restore sideways scroll of wide tables/rows when part of the page is redrawn (important on phones) */
+const SIDE = '.twrap,.tabs,.sched';
+function sideScroll(root) { return root ? [...root.querySelectorAll(SIDE)].map(e => e.scrollLeft) : []; }
+function restoreSide(root, xs) { if (!root) return; [...root.querySelectorAll(SIDE)].forEach((e, k) => { if (xs[k]) e.scrollLeft = xs[k]; }); }
+function rerenderTable(id) { const el = document.getElementById('tb-' + id); if (el && TDEF[id]) { const xs = sideScroll(el); el.innerHTML = tblBody(id); restoreSide(el, xs); } }
 
 /* ---------- Modal & toast ---------- */
-function openModal(html, narrow) { const bg = $('#modalBg'); const y = UI.modal ? bg.scrollTop : 0; UI.modal = true; bg.classList.remove('hide'); bg.innerHTML = `<div class="modal ${narrow ? 'narrow' : ''}"><button class="mclose" data-a="closeModal">×</button>${html}</div>`; bg.scrollTop = y; }
+function openModal(html, narrow) { const bg = $('#modalBg'); const y = UI.modal ? bg.scrollTop : 0; const xs = UI.modal ? sideScroll(bg) : []; UI.modal = true; bg.classList.remove('hide'); bg.innerHTML = `<div class="modal ${narrow ? 'narrow' : ''}"><button class="mclose" data-a="closeModal">×</button>${html}</div>`; bg.scrollTop = y; restoreSide(bg, xs); }
 function closeModal() { UI.modal = null; UI.prof = null; $('#modalBg').classList.add('hide'); $('#modalBg').innerHTML = ''; }
 function confirmBox(title, msg, okLabel, fn, danger) {
   UI._confirm = fn;
@@ -2718,7 +2722,11 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', () => { if (S) { Store.save(S); Lock.free(); } });
 window.addEventListener('pageshow', ev => { if (ev.persisted && S && Lock.slot) Lock.take(S.id).then(ok => { if (!ok) Lock.onLost(); }); });
 function dirty() { UI.dirty = true; }
+/* Don't redraw the page while the player is in the middle of scrolling or swiping; catch up a moment later */
+let lastTouch = 0, liveTimer = null;
+['scroll', 'touchstart', 'touchmove', 'wheel'].forEach(ev => document.addEventListener(ev, () => { lastTouch = Date.now(); }, { capture: true, passive: true }));
 function liveRender() {
+  if (Date.now() - lastTouch < 1500) { clearTimeout(liveTimer); liveTimer = setTimeout(liveRender, 1600); return; }
   if (UI.modal) { if (UI.prof && !document.activeElement?.closest?.('.modal select,.modal input')) { const t = UI.profTab; openInmate(UI.prof); UI.profTab = t; } return; }
   const ae = document.activeElement; if (ae && ae.closest && ae.closest('main') && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
   render(true);
@@ -2756,9 +2764,9 @@ function updateHeader() {
 function setSaveDot(s) { const el = $('#saveDot'); if (el) el.textContent = s === 'saving' ? 'Saving…' : s === 'ok' ? 'Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : s === 'err' ? 'Save failed' : ''; }
 /* Re-render the current page. Keeps the scroll position unless toTop is set (only when switching pages). */
 function render(live, toTop) {
-  const main = $('#main'); const y = main.scrollTop;
+  const main = $('#main'); const y = main.scrollTop; const xs = toTop ? [] : sideScroll(main);
   try { main.innerHTML = V[UI.view](); } catch (e) { console.error(e); main.innerHTML = `<div class="alert bad">Error rendering view: ${esc(e.message)}</div>`; }
-  main.scrollTop = toTop ? 0 : y;
+  main.scrollTop = toTop ? 0 : y; restoreSide(main, xs);
   renderNav();
 }
 

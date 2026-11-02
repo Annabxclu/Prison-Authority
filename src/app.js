@@ -223,7 +223,11 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', () => { if (S) { Store.save(S); Lock.free(); } });
 window.addEventListener('pageshow', ev => { if (ev.persisted && S && Lock.slot) Lock.take(S.id).then(ok => { if (!ok) Lock.onLost(); }); });
 function dirty() { UI.dirty = true; }
+/* Don't redraw the page while the player is in the middle of scrolling or swiping; catch up a moment later */
+let lastTouch = 0, liveTimer = null;
+['scroll', 'touchstart', 'touchmove', 'wheel'].forEach(ev => document.addEventListener(ev, () => { lastTouch = Date.now(); }, { capture: true, passive: true }));
 function liveRender() {
+  if (Date.now() - lastTouch < 1500) { clearTimeout(liveTimer); liveTimer = setTimeout(liveRender, 1600); return; }
   if (UI.modal) { if (UI.prof && !document.activeElement?.closest?.('.modal select,.modal input')) { const t = UI.profTab; openInmate(UI.prof); UI.profTab = t; } return; }
   const ae = document.activeElement; if (ae && ae.closest && ae.closest('main') && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
   render(true);
@@ -261,9 +265,9 @@ function updateHeader() {
 function setSaveDot(s) { const el = $('#saveDot'); if (el) el.textContent = s === 'saving' ? 'Saving…' : s === 'ok' ? 'Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : s === 'err' ? 'Save failed' : ''; }
 /* Re-render the current page. Keeps the scroll position unless toTop is set (only when switching pages). */
 function render(live, toTop) {
-  const main = $('#main'); const y = main.scrollTop;
+  const main = $('#main'); const y = main.scrollTop; const xs = toTop ? [] : sideScroll(main);
   try { main.innerHTML = V[UI.view](); } catch (e) { console.error(e); main.innerHTML = `<div class="alert bad">Error rendering view: ${esc(e.message)}</div>`; }
-  main.scrollTop = toTop ? 0 : y;
+  main.scrollTop = toTop ? 0 : y; restoreSide(main, xs);
   renderNav();
 }
 

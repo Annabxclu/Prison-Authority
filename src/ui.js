@@ -53,10 +53,14 @@ function tblBody(id) {
     <button class="btn sm" data-tp="${id}|-1"${st.page === 0 ? ' disabled' : ''}>‹ Prev</button><button class="btn sm" data-tp="${id}|1"${st.page >= pages - 1 ? ' disabled' : ''}>Next ›</button></div>`;
   return h;
 }
-function rerenderTable(id) { const el = document.getElementById('tb-' + id); if (el && TDEF[id]) el.innerHTML = tblBody(id); }
+/* Remember and restore sideways scroll of wide tables/rows when part of the page is redrawn (important on phones) */
+const SIDE = '.twrap,.tabs,.sched';
+function sideScroll(root) { return root ? [...root.querySelectorAll(SIDE)].map(e => e.scrollLeft) : []; }
+function restoreSide(root, xs) { if (!root) return; [...root.querySelectorAll(SIDE)].forEach((e, k) => { if (xs[k]) e.scrollLeft = xs[k]; }); }
+function rerenderTable(id) { const el = document.getElementById('tb-' + id); if (el && TDEF[id]) { const xs = sideScroll(el); el.innerHTML = tblBody(id); restoreSide(el, xs); } }
 
 /* ---------- Modal & toast ---------- */
-function openModal(html, narrow) { const bg = $('#modalBg'); const y = UI.modal ? bg.scrollTop : 0; UI.modal = true; bg.classList.remove('hide'); bg.innerHTML = `<div class="modal ${narrow ? 'narrow' : ''}"><button class="mclose" data-a="closeModal">×</button>${html}</div>`; bg.scrollTop = y; }
+function openModal(html, narrow) { const bg = $('#modalBg'); const y = UI.modal ? bg.scrollTop : 0; const xs = UI.modal ? sideScroll(bg) : []; UI.modal = true; bg.classList.remove('hide'); bg.innerHTML = `<div class="modal ${narrow ? 'narrow' : ''}"><button class="mclose" data-a="closeModal">×</button>${html}</div>`; bg.scrollTop = y; restoreSide(bg, xs); }
 function closeModal() { UI.modal = null; UI.prof = null; $('#modalBg').classList.add('hide'); $('#modalBg').innerHTML = ''; }
 function confirmBox(title, msg, okLabel, fn, danger) {
   UI._confirm = fn;
