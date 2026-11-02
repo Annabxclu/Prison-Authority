@@ -56,7 +56,7 @@ function tblBody(id) {
 function rerenderTable(id) { const el = document.getElementById('tb-' + id); if (el && TDEF[id]) el.innerHTML = tblBody(id); }
 
 /* ---------- Modal & toast ---------- */
-function openModal(html, narrow) { UI.modal = true; $('#modalBg').classList.remove('hide'); $('#modalBg').innerHTML = `<div class="modal ${narrow ? 'narrow' : ''}"><button class="mclose" data-a="closeModal">×</button>${html}</div>`; }
+function openModal(html, narrow) { const bg = $('#modalBg'); const y = UI.modal ? bg.scrollTop : 0; UI.modal = true; bg.classList.remove('hide'); bg.innerHTML = `<div class="modal ${narrow ? 'narrow' : ''}"><button class="mclose" data-a="closeModal">×</button>${html}</div>`; bg.scrollTop = y; }
 function closeModal() { UI.modal = null; UI.prof = null; $('#modalBg').classList.add('hide'); $('#modalBg').innerHTML = ''; }
 function confirmBox(title, msg, okLabel, fn, danger) {
   UI._confirm = fn;
@@ -269,7 +269,7 @@ function renderProfile(i, queued) {
   }
   openModal(h);
 }
-A.inmate = id => { UI.profTab = 'Overview'; openInmate(id); };
+A.inmate = id => { UI.profTab = 'Overview'; UI.modal = null; openInmate(id); };
 A.ptab = t => { UI.profTab = t; openInmate(UI.prof); };
 C.pMoveSel = v => { if (!v) return; const i = getInm(UI.prof); const [bid, n] = v.split(':'); const b = getBlock(bid); const c = b && b.cells.find(c => c.n === +n); if (i && c && c.occ.length < c.beds) { moveInmate(i, b, c, 'administration'); afterRelocate(i); dirty(); toast('good', `${iname(i)} moved to ${cellLabel(i)}.`); } openInmate(UI.prof); };
 C.pSwapSel = v => { if (!v) return; const i = getInm(UI.prof), x = getInm(v); if (i && x && swapInmates(i, x, 'administration')) { afterRelocate(i); afterRelocate(x); dirty(); toast('good', `${iname(i)} and ${iname(x)} swapped cells.`); } openInmate(UI.prof); };

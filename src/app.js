@@ -259,10 +259,11 @@ function updateHeader() {
   const bd = $('#hBadge'); bd.textContent = unread; bd.classList.toggle('hide', !unread);
 }
 function setSaveDot(s) { const el = $('#saveDot'); if (el) el.textContent = s === 'saving' ? 'Saving…' : s === 'ok' ? 'Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : s === 'err' ? 'Save failed' : ''; }
-function render(live) {
+/* Re-render the current page. Keeps the scroll position unless toTop is set (only when switching pages). */
+function render(live, toTop) {
   const main = $('#main'); const y = main.scrollTop;
   try { main.innerHTML = V[UI.view](); } catch (e) { console.error(e); main.innerHTML = `<div class="alert bad">Error rendering view: ${esc(e.message)}</div>`; }
-  if (live) main.scrollTop = y; else main.scrollTop = 0;
+  main.scrollTop = toTop ? 0 : y;
   renderNav();
 }
 
@@ -290,10 +291,10 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && UI.modal) closeModal();
 });
 $('#modalBg').addEventListener('click', e => { if (e.target.id === 'modalBg') closeModal(); });
-window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (S && V[v] && v !== UI.view) { UI.view = v; render(); } });
+window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (S && V[v] && v !== UI.view) { UI.view = v; render(false, true); } });
 
 A.closeModal = () => closeModal();
-A.nav = v => { if (!V[v]) return; UI.view = v; try { history.replaceState(null, '', '#' + v); } catch (e) { } $('#nav').classList.remove('open'); render(); };
+A.nav = v => { if (!V[v]) return; UI.view = v; try { history.replaceState(null, '', '#' + v); } catch (e) { } $('#nav').classList.remove('open'); render(false, true); };
 A.toggleNav = () => $('#nav').classList.toggle('open');
 A.speed = v => setSpeed(+v);
 A.readAll = () => { S.notes.forEach(n => n.read = true); updateHeader(); render(true); };
